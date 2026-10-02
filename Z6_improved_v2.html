@@ -1,0 +1,3724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Knight &amp; Princess — Zombie Siege</title>
+<style>
+  html, body {
+    margin: 0; padding: 0;
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: #05070c;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    cursor: crosshair;
+    touch-action: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+
+<script>
+'use strict';
+
+
+/* KNIGHT & PRINCESS — ZOMBIE SIEGE */
+
+
+// ----------------------------------------------------------------- CANVAS
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.floor(window.innerWidth * dpr);
+  canvas.height = Math.floor(window.innerHeight * dpr);
+  canvas.style.width = window.innerWidth + 'px';
+  canvas.style.height = window.innerHeight + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+resize();
+window.addEventListener('resize', resize);
+
+
+const W = () => window.innerWidth;
+const H = () => window.innerHeight;
+const PAD = 22;
+
+
+// ------------------------------------------------------------ MATH HELPERS
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const rand = (a, b) => a + Math.random() * (b - a);
+const randInt = (a, b) => Math.floor(rand(a, b + 1));
+const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
+const dist2 = (ax, ay, bx, by) => { const dx = ax - bx, dy = ay - by; return dx*dx + dy*dy; };
+
+
+function angleDelta(a, b) {
+  let d = a - b;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return d;
+}
+
+
+function roundRect(x, y, w, h, r) {
+  r = Math.min(r, Math.abs(w) / 2, Math.abs(h) / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+
+// ================================================================ WEAPONS
+const WEAPONS = [
+  // ---- Free (unlock by level)
+  { id:'sword', name:'Blade of Light', short:'SWORD', unlock:1, gemCost:0, melee:true,
+    dmg:35, cd:0.30, range:78, arc:1.2, color:'#dfe7f2' },
+  { id:'pistol', name:'Royal Pistol', short:'PISTOL', unlock:1, gemCost:0,
+    dmg:15, cd:0.24, speed:900, spread:0.02, pellets:1, color:'#ffd85e' },
+  { id:'smg', name:'Storm SMG', short:'SMG', unlock:3, gemCost:0,
+    dmg:10, cd:0.08, speed:1000, spread:0.12, pellets:1, color:'#8ef2c0' },
+  { id:'shotgun', name:'Doom Shotgun', short:'SHOTGUN', unlock:5, gemCost:0,
+    dmg:12, cd:0.70, speed:800, spread:0.32, pellets:7, color:'#ff9b57' },
+  { id:'rifle', name:'Viper Rifle', short:'RIFLE', unlock:7, gemCost:0,
+    dmg:25, cd:0.13, speed:1200, spread:0.05, pellets:1, color:'#7fc4ff' },
+  { id:'laser', name:'Laser Lance', short:'LASER', unlock:9, gemCost:0,
+    dmg:45, cd:0.22, speed:2200, spread:0.00, pellets:1, pierce:3, color:'#ff5ec7' },
+  { id:'rocket', name:'Rocket Launcher', short:'ROCKET', unlock:12, gemCost:0,
+    dmg:75, cd:1.10, speed:600, spread:0.03, pellets:1, explode:90, color:'#ff4d4d' },
+
+
+  // ---- Premium (gems)
+  { id:'crystal', name:'Crystal Shard', short:'CRYSTAL', unlock:1, gemCost:30,
+    dmg:18, cd:0.15, speed:1300, spread:0.08, pellets:3, color:'#ff66c4' },
+  { id:'flame', name:'Flame Thrower', short:'FLAME', unlock:1, gemCost:35,
+    dmg:8, cd:0.04, speed:600, spread:0.45, pellets:3, color:'#ff6b35' },
+  { id:'frost', name:'Frost Cannon', short:'FROST', unlock:1, gemCost:40,
+    dmg:30, cd:0.35, speed:1400, spread:0.02, pellets:1, slow:0.6, color:'#8af0ff' },
+  { id:'phantom', name:'Phantom Chakram', short:'CHAKRAM', unlock:1, gemCost:45,
+    dmg:22, cd:0.18, speed:1100, spread:0.04, pellets:2, bounce:2, color:'#c0a0ff' },
+  { id:'thunder', name:'Thunder Hammer', short:'THUNDER', unlock:1, gemCost:50, melee:true,
+    dmg:70, cd:0.50, range:92, arc:1.8, color:'#ffe066' },
+  { id:'plasma', name:'Plasma Rifle', short:'PLASMA', unlock:1, gemCost:55,
+    dmg:38, cd:0.20, speed:1900, spread:0.01, pellets:1, color:'#00ff88' },
+  { id:'void', name:'Void Cannon', short:'VOID', unlock:1, gemCost:60,
+    dmg:55, cd:0.50, speed:1600, spread:0.00, pellets:1, pierce:5, color:'#b366ff' },
+  { id:'gravity', name:'Gravity Gun', short:'GRAVITY', unlock:1, gemCost:70,
+    dmg:40, cd:0.40, speed:1000, spread:0.00, pellets:1, pull:1, color:'#aaffaa' },
+];
+
+
+// ============================================================== KNIGHT SKINS
+const SKINS = [
+  { name:'Blue Knight', unlock:1, gemCost:0, body:'#3b6fd4', trim:'#d8e2f0', cape:'#2a4f9e' },
+  { name:'Crimson Knight', unlock:2, gemCost:0, body:'#c0392b', trim:'#f5d76e', cape:'#8e2a20' },
+  { name:'Verdant Ranger', unlock:4, gemCost:0, body:'#2e8b57', trim:'#c8f7c5', cape:'#1e5f3a' },
+  { name:'Shadow Assassin', unlock:6, gemCost:0, body:'#2c2c3a', trim:'#b06cf0', cape:'#181820' },
+  { name:'Golden Paladin', unlock:8, gemCost:0, body:'#d4af37', trim:'#fff3b0', cape:'#9c7c1f' },
+  { name:'Frost Warden', unlock:10, gemCost:0, body:'#3aa7d8', trim:'#e6ffff', cape:'#24708f' },
+  { name:'Void Champion', unlock:12, gemCost:0, body:'#6a0dad', trim:'#ff6ec7', cape:'#3f0870' },
+  { name:'Obsidian Lord', unlock:1, gemCost:80, body:'#1a1a24', trim:'#ff4444', cape:'#0a0a10' },
+  { name:'Celestial Knight', unlock:1, gemCost:120, body:'#ffffff', trim:'#ffe066', cape:'#6699ff' },
+  { name:'Royal Steel', unlock:1, gemCost:150, body:'#64748b', trim:'#f8fafc', cape:'#334155' },
+  { name:'Inferno Knight', unlock:1, gemCost:180, body:'#dc2626', trim:'#fed7aa', cape:'#7f1d1d' },
+  { name:'Emerald Knight', unlock:1, gemCost:200, body:'#059669', trim:'#d1fae5', cape:'#064e3b' },
+  { name:'Night King', unlock:1, gemCost:240, body:'#111827', trim:'#93c5fd', cape:'#030712' },
+  { name:'Solar Knight', unlock:1, gemCost:280, body:'#f59e0b', trim:'#fff7ed', cape:'#92400e' },
+];
+
+
+// =========================================================== PRINCESS SKINS
+const PRINCESS_SKINS = [
+  { name:'Classic Rose', gemCost:0, dress:'#e75480', hair:'#f2c14e', crown:'#ffd75e' },
+  { name:'Snow Queen', gemCost:30, dress:'#c8e6ff', hair:'#ffffff', crown:'#b0d0ff' },
+  { name:'Forest Nymph', gemCost:35, dress:'#2ecc71', hair:'#6b8e23', crown:'#f0e68c' },
+  { name:'Ember Princess', gemCost:40, dress:'#ff6b35', hair:'#cc3300', crown:'#ffaa00' },
+  { name:'Violet Empress', gemCost:50, dress:'#9b59b6', hair:'#2c0a3a', crown:'#f1c40f' },
+  { name:'Shadow Queen', gemCost:60, dress:'#34495e', hair:'#1a1a2e', crown:'#e74c3c' },
+  { name:'Golden Empress', gemCost:80, dress:'#f39c12', hair:'#8b4513', crown:'#fff44f' },
+  { name:'Crystal Crown', gemCost:100, dress:'#a8e6cf', hair:'#e0f7fa', crown:'#b2ebf2' },
+  { name:'Royal Sapphire', gemCost:120, dress:'#2563eb', hair:'#e2e8f0', crown:'#93c5fd' },
+  { name:'Ruby Princess', gemCost:140, dress:'#be123c', hair:'#fda4af', crown:'#fecdd3' },
+  { name:'Moonlight Princess', gemCost:160, dress:'#4f46e5', hair:'#c4b5fd', crown:'#e0e7ff' },
+  { name:'Sun Princess', gemCost:190, dress:'#ea580c', hair:'#fde68a', crown:'#fef3c7' },
+  { name:'Cosmic Empress', gemCost:230, dress:'#7c3aed', hair:'#ddd6fe', crown:'#f5d0fe' },
+];
+
+// ============================================================== ZOMBIES
+const ZOMBIE_TYPES = {
+  walker: { hp:40, speed:50, r:14, dmg:7, xp:8, color:'#6b9a4a', dark:'#39522a' },
+  runner: { hp:24, speed:105, r:12, dmg:5, xp:10, color:'#a9d65c', dark:'#4f6b2c' },
+  brute: { hp:180, speed:36, r:22, dmg:16, xp:24, color:'#5a7f9e', dark:'#243b52' },
+  boss_abom: { hp:600, speed:40, r:34, dmg:22, xp:100, color:'#a03a56', dark:'#4a1424', boss:true },
+  boss_necromancer:{ hp:450, speed:55, r:28, dmg:12, xp:120, color:'#6a0dad', dark:'#2a0a4a', boss:true, summon:true },
+  boss_brutal: { hp:900, speed:30, r:40, dmg:30, xp:140, color:'#8b4513', dark:'#3d1c02', boss:true, rage:true },
+  boss_phantom: { hp:350, speed:85, r:24, dmg:18, xp:110, color:'#b0a0ff', dark:'#4a3a8a', boss:true, phase:true },
+  boss_colossus: { hp:1500,speed:22, r:48, dmg:35, xp:200, color:'#ff4444', dark:'#661111', boss:true },
+};
+
+
+// ============================================================== GAME STATE
+let mode = 'menu';
+let prevMode = 'menu';
+
+
+let player, princess, zombies, bullets, particles, pickups, decals, toasts, stage;
+let soldiers = [];
+let shakeT = 0, shakeMag = 0;
+
+
+let skinIndex = 0;
+let princessSkinIndex = 0;
+let skinCursor = 0;
+let princessCursor = 0;
+let weaponShopCursor = 0;
+let maxLevel = 1;
+let bestStage = 1;
+let gameOverReason = '';
+
+
+let gems = 50;
+let highScore = 0;
+let leaderboard = [];
+let unlockedWeapons = ['sword', 'pistol'];
+let unlockedPrincessSkins = [0];
+let unlockedKnightSkins = [0];
+
+
+// live run score
+let runScore = 0;
+let finalScore = 0;
+
+
+// ad
+let adTimer = 0;
+let adRewardPending = 0;
+let adActive = false;
+
+
+// input
+const keys = Object.create(null);
+const mouse = { x: 0, y: 0, down: false };
+
+
+// touch sticks
+const STICK_RADIUS = 52;
+const touchState = { move: null, aim: null };
+
+
+// UI click areas (rebuilt every overlay draw)
+let hitAreas = [];
+function addHit(x, y, w, h, fn) { hitAreas.push({ x, y, w, h, fn }); }
+
+
+// ================================================================== SAVE
+const SAVE_KEY = 'zps_save_v2';
+let storageOK = true; // flips false if the browser blocks storage
+let saveFlash = 0; // >0 briefly shows the "SAVED" badge
+let saveTimer = 3; // autosave interval countdown
+let difficulty = 'normal';
+let abilityCooldown = { clear: 0, shock: 0, tank: 0 };
+let tankMode = false;
+let tankTimer = 0;
+let tankShots = 0;
+let menuDifficulty = 'normal';
+
+
+
+function buildSave() {
+  return JSON.stringify({
+    v: 2,
+    gems, highScore, leaderboard,
+    unlockedWeapons, unlockedPrincessSkins, unlockedKnightSkins,
+    skinIndex, princessSkinIndex, maxLevel, bestStage,
+  });
+}
+
+
+function save() {
+  const data = buildSave();
+  let ok = false;
+
+
+  // 1) localStorage — works on http://, https://, and most file:// pages
+  try {
+    localStorage.setItem(SAVE_KEY, data);
+    ok = true;
+  } catch (e) {
+    storageOK = false;
+  }
+
+
+  // 2) Fallback mirror in window.name — survives F5 even on file://
+  try {
+    window.name = 'ZPS:' + data;
+    ok = true;
+  } catch (e) { /* nothing left to try */ }
+
+
+  if (ok) saveFlash = 1.4;
+  return ok;
+}
+
+
+function readSave() {
+  // primary
+  try {
+    const v = localStorage.getItem(SAVE_KEY);
+    if (v) return v;
+  } catch (e) { storageOK = false; }
+
+
+  // migrate the old key from the previous build
+  try {
+    const old = localStorage.getItem('zps_save');
+    if (old) return old;
+  } catch (e) { /* ignore */ }
+
+
+  // fallback
+  try {
+    if (window.name && window.name.indexOf('ZPS:') === 0) return window.name.slice(4);
+  } catch (e) { /* ignore */ }
+
+
+  return null;
+}
+
+
+function load() {
+  const raw = readSave();
+  if (!raw) return;
+  try {
+    const d = JSON.parse(raw);
+    // typeof checks — NOT truthy checks, so 0 and [] load correctly
+    if (typeof d.gems === 'number') gems = d.gems;
+    if (typeof d.highScore === 'number') highScore = d.highScore;
+    if (Array.isArray(d.leaderboard)) leaderboard = d.leaderboard;
+    if (Array.isArray(d.unlockedWeapons)) unlockedWeapons = d.unlockedWeapons;
+    if (Array.isArray(d.unlockedPrincessSkins)) unlockedPrincessSkins = d.unlockedPrincessSkins;
+    if (Array.isArray(d.unlockedKnightSkins)) unlockedKnightSkins = d.unlockedKnightSkins;
+    if (typeof d.skinIndex === 'number') skinIndex = d.skinIndex;
+    if (typeof d.princessSkinIndex === 'number') princessSkinIndex = d.princessSkinIndex;
+    if (typeof d.maxLevel === 'number') maxLevel = d.maxLevel;
+    if (typeof d.bestStage === 'number') bestStage = d.bestStage;
+  } catch (e) { /* corrupt save — ignore, start fresh */ }
+}
+load();
+
+
+// ================================================================= HELPERS
+function xpNeeded(lvl) { return Math.floor(20 * Math.pow(1.22, lvl - 1)); }
+function stageQuota(lvl) { return 8 + lvl * 4; }
+
+
+function addToast(text, color) {
+  toasts.push({ text, color: color || '#ffffff', life: 2.6, max: 2.6 });
+  if (toasts.length > 5) toasts.shift();
+}
+
+
+function shakeScreen(mag, time) {
+  shakeMag = Math.max(shakeMag, mag);
+  shakeT = Math.max(shakeT, time);
+}
+
+
+// ================================================================ RESET
+function resetGame() {
+  player = {
+    x: W() * 0.42, y: H() * 0.55, r: 15, angle: 0,
+    hp: 100, maxHp: 100, speed: 235,
+    level: 1, xp: 0, xpNext: xpNeeded(1), dmgMult: 1,
+    wIdx: firstOwnedWeaponIndex(),
+    cd: 0, swing: 0, flash: 0, kills: 0,
+  };
+
+
+  princess = {
+    x: W() * 0.22, y: H() * 0.55, r: 14,
+    hp: 100, maxHp: 100, speed: 155, follow: 92, flash: 0,
+  };
+
+
+  zombies = []; bullets = []; particles = []; pickups = []; decals = [];
+  toasts = []; soldiers = [];
+  shakeT = 0; shakeMag = 0;
+  runScore = 0;
+  finalScore = 0;
+  startStage(1, true);
+}
+
+
+function firstOwnedWeaponIndex() {
+  for (let i = 0; i < WEAPONS.length; i++) {
+    if (unlockedWeapons.includes(WEAPONS[i].id)) return i;
+  }
+  return 0;
+}
+
+
+function startStage(level, silent) {
+  stage = {
+    level,
+    remaining: stageQuota(level),
+    spawnTimer: 1.2,
+    interval: Math.max(0.16, 1.08 - level * 0.075),
+    bossSpawned: false,
+    cleared: false,
+    completeTimer: 0,
+  };
+  if (!silent) {
+    const isBoss = level % 2 === 0;
+    addToast(`STAGE ${level}${isBoss ? ' — BOSS INCOMING!' : ''}`,
+             isBoss ? '#ff6b6b' : '#8ecbff');
+  }
+}
+
+
+function startGameOriginal() {
+  resetGame();
+  mode = 'playing';
+  last = performance.now();
+}
+
+
+function endGame(reason) {
+  if (mode === 'gameover') return; // guard: never fire twice
+  mode = 'gameover';
+  gameOverReason = reason;
+  bestStage = Math.max(bestStage, stage.level);
+
+
+  // Final score = live score + survival bonus + level bonus
+  finalScore = Math.floor(
+    runScore +
+    Math.max(0, princess.hp) * 3 +
+    player.level * 50 +
+    stage.level * 100
+  );
+
+
+  const isNewBest = finalScore > highScore;
+  if (isNewBest) highScore = finalScore;
+
+
+  if (finalScore > 0) {
+    leaderboard.push({
+      name: 'You',
+      score: finalScore,
+      stage: stage.level,
+      date: Date.now(),
+    });
+    leaderboard.sort((a, b) => b.score - a.score);
+    leaderboard = leaderboard.slice(0, 20);
+  }
+
+
+  save(); // persist immediately
+  addToast(isNewBest ? '🏆 NEW HIGH SCORE!' : `Score: ${finalScore}`,
+           isNewBest ? '#ffe066' : '#8ecbff');
+}
+
+
+// ================================================================ XP
+function gainXP(n) {
+  player.xp += n;
+  while (player.xp >= player.xpNext) {
+    player.xp -= player.xpNext;
+    levelUp();
+  }
+}
+
+
+function levelUp() {
+  player.level++;
+  player.xpNext = xpNeeded(player.level);
+  player.maxHp += 12;
+  player.hp = Math.min(player.maxHp, player.hp + 35);
+  player.dmgMult = 1 + (player.level - 1) * 0.07;
+  maxLevel = Math.max(maxLevel, player.level);
+
+
+  addToast(`LEVEL UP! → ${player.level}`, '#ffe066');
+
+
+  for (const w of WEAPONS) {
+    if (w.gemCost === 0 && w.unlock === player.level && !unlockedWeapons.includes(w.id)) {
+      unlockedWeapons.push(w.id);
+      addToast(`New weapon: ${w.name}`, w.color);
+    }
+  }
+  for (let i = 0; i < SKINS.length; i++) {
+    const s = SKINS[i];
+    if (s.gemCost === 0 && s.unlock === player.level && !unlockedKnightSkins.includes(i)) {
+      unlockedKnightSkins.push(i);
+      addToast(`New knight skin: ${s.name}`, '#c9a0ff');
+    }
+  }
+  save();
+}
+
+
+// ================================================================ COMBAT
+function fireWeaponOriginal(w) {
+  player.cd = w.cd;
+
+
+  if (w.melee) {
+    player.swing = 0.18;
+    shakeScreen(3, 0.08);
+    for (const z of zombies) {
+      if (z.dead) continue;
+      if (dist(player.x, player.y, z.x, z.y) > w.range + z.r) continue;
+      const a = Math.atan2(z.y - player.y, z.x - player.x);
+      if (Math.abs(angleDelta(a, player.angle)) < w.arc) {
+        hitZombie(z, w.dmg * player.dmgMult, a, 14);
+      }
+    }
+    return;
+  }
+
+
+  const mx = player.x + Math.cos(player.angle) * 20;
+  const my = player.y + Math.sin(player.angle) * 20;
+
+
+  for (let i = 0; i < w.pellets; i++) {
+    const a = player.angle + rand(-w.spread, w.spread);
+    bullets.push({
+      x: mx, y: my,
+      vx: Math.cos(a) * w.speed,
+      vy: Math.sin(a) * w.speed,
+      dmg: w.dmg * player.dmgMult,
+      r: w.id === 'rocket' ? 5 : (w.id === 'flame' ? 3 : 2.5),
+      life: (w.id === 'laser' || w.id === 'plasma') ? 0.6 : 1.0,
+      color: w.color,
+      pierce: w.pierce || 0,
+      explode: w.explode || 0,
+      slow: w.slow || 0,
+      bounceLeft: w.bounce || 0,
+      pull: w.pull || 0,
+      trail: w.id === 'rocket' || w.id === 'laser' || w.id === 'flame',
+      hit: new Set(),
+    });
+  }
+
+
+  for (let i = 0; i < 5; i++) {
+    const a = player.angle + rand(-0.5, 0.5);
+    particles.push({
+      x: mx, y: my,
+      vx: Math.cos(a) * rand(60, 200), vy: Math.sin(a) * rand(60, 200),
+      life: 0.12, max: 0.12, r: rand(1, 2.5), color: w.color, drag: 4,
+    });
+  }
+
+
+  shakeScreen(w.id === 'rocket' ? 7 : 2, 0.06);
+}
+
+
+function hitZombie(z, dmg, angle, knock) {
+  if (z.dead) return;
+  z.hp -= dmg;
+  z.flash = 0.12;
+
+
+  if (knock) {
+    z.x += Math.cos(angle) * knock * 0.5;
+    z.y += Math.sin(angle) * knock * 0.5;
+  }
+  spawnBlood(z.x, z.y, angle, dmg > 40 ? 8 : 4);
+
+
+  // Phantom boss phase mechanic
+  if (z.type === 'boss_phantom') {
+    z._phaseCount = (z._phaseCount || 0) + 1;
+  }
+
+
+  if (z.hp <= 0) killZombie(z);
+}
+
+
+function applySlow(z) {
+  z.slowTimer = 1.8;
+  if (!z.origSpeed) z.origSpeed = z.speed;
+}
+
+
+function killZombie(z) {
+  z.dead = true;
+  player.kills++;
+  gainXP(z.xp);
+
+
+  // live score: base + XP value, bosses worth much more
+  runScore += z.type.startsWith('boss') ? 500 : (10 + Math.floor(z.xp * 0.6));
+
+
+  spawnBlood(z.x, z.y, rand(0, Math.PI * 2), 14);
+  addDecal(z.x, z.y, z.r * 1.5);
+  shakeScreen(z.type.startsWith('boss') ? 14 : 3, 0.12);
+
+
+  // Loot
+  if (Math.random() < (z.type.startsWith('boss') ? 1 : 0.07)) {
+    pickups.push({ x: z.x, y: z.y, r: 11, life: 15, bob: 0 });
+  }
+  if (Math.random() < (z.type.startsWith('boss') ? 0.22 : 0.0015)) {
+    const g = 1;
+    pickups.push({ x: z.x, y: z.y, r: 8, life: 15, bob: 0, gemValue: g });
+  }
+
+
+  // Boss rewards
+  if (z.type.startsWith('boss')) {
+    const bonus = 150 + Math.floor(z.xp * 1.5);
+    gainXP(bonus);
+    const gemReward = randInt(1, 2);
+    gems += gemReward;
+    addToast(`BOSS DOWN! +${bonus} XP +${gemReward}💎`, '#ff9b57');
+    save();
+
+
+    // Necromancer summons walkers on death
+    if (z.type === 'boss_necromancer') {
+      for (let i = 0; i < 3; i++) spawnZombie('walker');
+      addToast('Necromancer summons minions!', '#ff6b6b');
+    }
+  }
+}
+
+
+function explode(x, y, radius, dmg) {
+  shakeScreen(9, 0.22);
+  for (let i = 0; i < 30; i++) {
+    const a = rand(0, Math.PI * 2);
+    const sp = rand(80, 340);
+    particles.push({
+      x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+      life: rand(0.25, 0.55), max: 0.55, r: rand(2, 5),
+      color: i % 3 === 0 ? '#fff2a8' : (i % 3 === 1 ? '#ff9b3d' : '#ff4d3d'),
+      drag: 3,
+    });
+  }
+  for (const z of zombies) {
+    if (z.dead) continue;
+    const d = dist(x, y, z.x, z.y);
+    if (d < radius + z.r) {
+      const a = Math.atan2(z.y - y, z.x - x);
+      const falloff = 1 - (d / (radius + z.r)) * 0.5;
+      hitZombie(z, dmg * falloff, a, 26);
+    }
+  }
+}
+
+
+// ================================================================ FX
+function spawnBlood(x, y, angle, count) {
+  for (let i = 0; i < count; i++) {
+    const a = angle + rand(-0.9, 0.9);
+    const sp = rand(40, 200);
+    const life = rand(0.25, 0.6);
+    particles.push({
+      x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+      life, max: life, r: rand(1.5, 3.6),
+      color: Math.random() < 0.35 ? '#ff3b57' : '#8e1b2a',
+      drag: 3.2,
+    });
+  }
+  if (particles.length > 620) particles.splice(0, particles.length - 620);
+}
+
+
+function addDecal(x, y, r) {
+  decals.push({ x, y, r, rot: rand(0, Math.PI), life: 14, max: 14 });
+  if (decals.length > 120) decals.shift();
+}
+
+
+// ================================================================ SPAWN
+function pickZombieType(lvl) {
+  const w = {
+    walker: 10,
+    runner: lvl >= 2 ? 3 + lvl * 1.1 : 0,
+    brute: lvl >= 4 ? 1 + lvl * 0.7 : 0,
+  };
+  let r = Math.random() * (w.walker + w.runner + w.brute);
+  if ((r -= w.walker) < 0) return 'walker';
+  if ((r -= w.runner) < 0) return 'runner';
+  return 'brute';
+}
+
+
+function pickBossType(lvl) {
+  const pool = ['boss_abom'];
+  if (lvl >= 4) pool.push('boss_necromancer');
+  if (lvl >= 6) pool.push('boss_brutal');
+  if (lvl >= 9) pool.push('boss_phantom');
+  if (lvl >= 12) pool.push('boss_colossus');
+  return pool[randInt(0, pool.length - 1)];
+}
+
+
+function spawnZombie(forcedType) {
+  const type = forcedType || pickZombieType(stage.level);
+  const t = ZOMBIE_TYPES[type];
+
+
+  const side = randInt(0, 3);
+  let x, y;
+  if (side === 0) { x = rand(0, W()); y = -34; }
+  else if (side === 1) { x = W() + 34; y = rand(0, H()); }
+  else if (side === 2) { x = rand(0, W()); y = H() + 34; }
+  else { x = -34; y = rand(0, H()); }
+
+
+  const hpMult = 1 + (stage.level - 1) * 0.30;
+  const spMult = Math.min(2.25, 1 + (stage.level - 1) * 0.065);
+  const isBoss = t.boss === true;
+
+
+  zombies.push({
+    type, x, y,
+    r: t.r,
+    hp: t.hp * hpMult * (isBoss ? (difficulty==='hard' ? 1.65 : difficulty==='easy' ? 0.85 : 1.25) : 1),
+    maxHp: t.hp * hpMult,
+    speed: t.speed * spMult,
+    baseSpeed: t.speed * spMult,
+    dmg: t.dmg * (1 + (stage.level - 1) * 0.1) * difficultyScale(),
+    xp: t.xp,
+    attackCd: rand(0, 0.4),
+    flash: 0, face: 0, wob: rand(0, Math.PI * 2),
+    dead: false,
+    slowTimer: 0,
+    _phaseCount: 0,
+    isBoss,
+  });
+
+
+  if (isBoss) {
+    addToast(`⚔️ BOSS incoming!`, '#ff3b57');
+    shakeScreen(10, 0.3);
+  }
+}
+
+
+// ================================================================ UPDATE
+function update(dt) {
+  updateToasts(dt);
+  autoSave(dt);
+  updatePlayer(dt);
+  updatePrincess(dt);
+  updateSoldiers(dt);
+  updateZombies(dt);
+  updateBullets(dt);
+  updatePickups(dt);
+  updateParticles(dt);
+  updateDecals(dt);
+  updateSpawning(dt);
+  updateShake(dt);
+  updateAds(dt);
+
+
+  if (player.hp <= 0) endGame('The knight has fallen...');
+  else if (princess.hp <= 0) endGame('The princess was taken!');
+}
+
+
+function updateToasts(dt) {
+  for (let i = toasts.length - 1; i >= 0; i--) {
+    toasts[i].life -= dt;
+    if (toasts[i].life <= 0) toasts.splice(i, 1);
+  }
+  if (saveFlash > 0) saveFlash = Math.max(0, saveFlash - dt);
+}
+
+
+// Write meta-progress to disk every few seconds
+function autoSave(dt) {
+  saveTimer -= dt;
+  if (saveTimer <= 0) {
+    saveTimer = 3;
+    save();
+  }
+}
+
+
+function updateAds(dt) {
+  if (adTimer > 0) adTimer = Math.max(0, adTimer - dt);
+  if (adActive) {
+    adRewardPending -= dt;
+    if (adRewardPending <= 0) {
+      adActive = false;
+      const reward = randInt(10, 25);
+      gems += reward;
+      addToast(`Ad watched! +${reward} 💎`, '#7dff9b');
+      save();
+    }
+  }
+}
+
+
+function updatePlayerOriginal(dt) {
+  let mx = 0, my = 0;
+  if (keys['a'] || keys['arrowleft']) mx--;
+  if (keys['d'] || keys['arrowright']) mx++;
+  if (keys['w'] || keys['arrowup']) my--;
+  if (keys['s'] || keys['arrowdown']) my++;
+
+
+  if (touchState.move) {
+    const d = Math.hypot(touchState.move.dx, touchState.move.dy);
+    if (d > STICK_RADIUS * 0.14) {
+      const k = Math.min(1, d / STICK_RADIUS) / d;
+      mx = touchState.move.dx * k;
+      my = touchState.move.dy * k;
+    }
+  }
+
+
+  const len = Math.hypot(mx, my);
+  if (len > 1) { mx /= len; my /= len; }
+
+
+  player.x = clamp(player.x + mx * player.speed * dt, PAD, W() - PAD);
+  player.y = clamp(player.y + my * player.speed * dt, PAD, H() - PAD);
+
+
+  if (touchState.aim && Math.hypot(touchState.aim.dx, touchState.aim.dy) > 10) {
+    player.angle = Math.atan2(touchState.aim.dy, touchState.aim.dx);
+  } else {
+    player.angle = Math.atan2(mouse.y - player.y, mouse.x - player.x);
+  }
+
+
+  player.cd = Math.max(0, player.cd - dt);
+  player.swing = Math.max(0, player.swing - dt);
+  player.flash = Math.max(0, player.flash - dt);
+
+
+  const w = WEAPONS[player.wIdx];
+  const touchFiring = touchState.aim && Math.hypot(touchState.aim.dx, touchState.aim.dy) > 10;
+  if ((mouse.down || touchFiring) && player.cd <= 0) fireWeapon(w);
+}
+
+
+function updatePrincess(dt) {
+  princess.flash = Math.max(0, princess.flash - dt);
+  const d = dist(princess.x, princess.y, player.x, player.y);
+  if (d > princess.follow) {
+    const a = Math.atan2(player.y - princess.y, player.x - princess.x);
+    const step = Math.min(princess.speed * dt, d - princess.follow);
+    princess.x += Math.cos(a) * step;
+    princess.y += Math.sin(a) * step;
+  }
+  princess.x = clamp(princess.x, PAD, W() - PAD);
+  princess.y = clamp(princess.y, PAD, H() - PAD);
+  princess.hp = Math.min(princess.maxHp, princess.hp + 0.8 * dt);
+}
+
+
+function updateSoldiers(dt) {
+  for (const s of soldiers) {
+    s.flash = Math.max(0, s.flash - dt);
+    s.attackCd = Math.max(0, s.attackCd - dt);
+    s.wob += dt * 8;
+
+
+    // find nearest zombie
+    let nearest = null, nearD = 340;
+    for (const z of zombies) {
+      if (z.dead) continue;
+      const d = dist(s.x, s.y, z.x, z.y);
+      if (d < nearD) { nearD = d; nearest = z; }
+    }
+
+
+    if (nearest) {
+      const a = Math.atan2(nearest.y - s.y, nearest.x - s.x);
+      const contact = s.r + nearest.r + 2;
+      if (nearD > contact) {
+        s.x += Math.cos(a) * s.speed * dt;
+        s.y += Math.sin(a) * s.speed * dt;
+      } else if (s.attackCd <= 0) {
+        s.attackCd = 0.55;
+        hitZombie(nearest, s.dmg, a, 4);
+        s.flash = 0.1;
+      }
+    } else {
+      // follow player loosely
+      const a = Math.atan2(player.y - s.y, player.x - s.x);
+      const d = dist(s.x, s.y, player.x, player.y);
+      if (d > 70) {
+        s.x += Math.cos(a) * s.speed * dt;
+        s.y += Math.sin(a) * s.speed * dt;
+      }
+    }
+
+
+    s.x = clamp(s.x, PAD, W() - PAD);
+    s.y = clamp(s.y, PAD, H() - PAD);
+  }
+}
+
+
+function updateZombies(dt) {
+  for (const z of zombies) {
+    if (z.dead) continue;
+
+
+    z.flash = Math.max(0, z.flash - dt);
+    z.attackCd = Math.max(0, z.attackCd - dt);
+    z.wob += dt * (z.type === 'runner' ? 9 : 5);
+
+
+    // slow effect
+    if (z.slowTimer > 0) {
+      z.slowTimer -= dt;
+      z.speed = (z.origSpeed || z.speed) * 0.4;
+      if (z.slowTimer <= 0) z.speed = z.origSpeed || z.speed;
+    }
+
+
+    // Rage boss: speeds up as HP drops
+    if (z.type === 'boss_brutal') {
+      const frac = z.hp / z.maxHp;
+      z.speed = z.baseSpeed * (1 + (1 - frac) * 0.9);
+    }
+
+
+    // Phantom boss: teleports every few hits
+    if (z.type === 'boss_phantom' && z._phaseCount >= 5) {
+      z._phaseCount = 0;
+      z.x = rand(60, W() - 60);
+      z.y = rand(60, H() - 60);
+      z.flash = 0.4;
+      addToast('Phantom blinks!', '#b0a0ff');
+    }
+
+
+    // choose target (player, princess, or nearest soldier)
+    let tgt = player, minD = dist(z.x, z.y, player.x, player.y);
+    const dpr = dist(z.x, z.y, princess.x, princess.y);
+    if (dpr < minD) { tgt = princess; minD = dpr; }
+    for (const s of soldiers) {
+      const ds = dist(z.x, z.y, s.x, s.y);
+      if (ds < minD) { tgt = s; minD = ds; }
+    }
+
+
+    const a = Math.atan2(tgt.y - z.y, tgt.x - z.x);
+    const contact = z.r + tgt.r + 2;
+    z.face = a;
+
+
+    if (minD > contact) {
+      z.x += Math.cos(a) * z.speed * dt;
+      z.y += Math.sin(a) * z.speed * dt;
+    } else if (z.attackCd <= 0) {
+      z.attackCd = 0.85;
+      tgt.hp -= z.dmg;
+      tgt.flash = 0.15;
+      spawnBlood(tgt.x, tgt.y, a + Math.PI, 6);
+      shakeScreen(5, 0.12);
+
+
+      // soldiers die from damage
+      if (soldiers.includes(tgt) && tgt.hp <= 0) {
+        tgt.dead = true;
+        addToast('Soldier down!', '#ff6b6b');
+      }
+    }
+  }
+
+
+  // separation
+  for (let i = 0; i < zombies.length; i++) {
+    const a = zombies[i];
+    if (a.dead) continue;
+    for (let j = i + 1; j < zombies.length; j++) {
+      const b = zombies[j];
+      if (b.dead) continue;
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const minD = a.r + b.r;
+      const d2 = dx * dx + dy * dy;
+      if (d2 > 0.0001 && d2 < minD * minD) {
+        const d = Math.sqrt(d2);
+        const push = (minD - d) * 0.5;
+        const nx = dx / d, ny = dy / d;
+        a.x -= nx * push; a.y -= ny * push;
+        b.x += nx * push; b.y += ny * push;
+      }
+    }
+  }
+
+
+  zombies = zombies.filter(z => !z.dead);
+  soldiers = soldiers.filter(s => !s.dead);
+}
+
+
+function updateBullets(dt) {
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const b = bullets[i];
+
+
+    // gravity pull: accel toward nearest zombie
+    if (b.pull) {
+      let nearest = null, nd = 220;
+      for (const z of zombies) {
+        if (z.dead) continue;
+        const d = dist(b.x, b.y, z.x, z.y);
+        if (d < nd) { nd = d; nearest = z; }
+      }
+      if (nearest) {
+        const a = Math.atan2(nearest.y - b.y, nearest.x - b.x);
+        const sp = Math.hypot(b.vx, b.vy) || 1;
+        const pull = 500;
+        b.vx += Math.cos(a) * pull * dt;
+        b.vy += Math.sin(a) * pull * dt;
+        const nsp = Math.hypot(b.vx, b.vy) || 1;
+        b.vx = b.vx / nsp * sp;
+        b.vy = b.vy / nsp * sp;
+      }
+    }
+
+
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
+    b.life -= dt;
+
+
+    if (b.trail) {
+      particles.push({
+        x: b.x, y: b.y, vx: 0, vy: 0,
+        life: 0.12, max: 0.12, r: b.r * 0.9, color: b.color, drag: 0,
+      });
+    }
+
+
+    let dead = b.life <= 0 || b.x < -70 || b.x > W() + 70 || b.y < -70 || b.y > H() + 70;
+
+
+    if (!dead) {
+      for (const z of zombies) {
+        if (z.dead || b.hit.has(z)) continue;
+        const rr = z.r + b.r;
+        if (dist2(b.x, b.y, z.x, z.y) < rr * rr) {
+          b.hit.add(z);
+          if (b.explode) {
+            explode(b.x, b.y, b.explode, b.dmg);
+            dead = true;
+          } else {
+            hitZombie(z, b.dmg, Math.atan2(b.vy, b.vx), 6);
+            if (b.slow) applySlow(z);
+            if (b.pierce > 0) b.pierce--;
+            else if (b.bounceLeft > 0) {
+              b.bounceLeft--;
+              // reverse toward a new target
+              let nn = null, nd2 = 400;
+              for (const z2 of zombies) {
+                if (z2 === z || z2.dead) continue;
+                const d = dist(b.x, b.y, z2.x, z2.y);
+                if (d < nd2) { nd2 = d; nn = z2; }
+              }
+              if (nn) {
+                const a2 = Math.atan2(nn.y - b.y, nn.x - b.x);
+                const sp2 = Math.hypot(b.vx, b.vy);
+                b.vx = Math.cos(a2) * sp2;
+                b.vy = Math.sin(a2) * sp2;
+                b.hit = new Set(); // can hit others again
+                b.life = Math.max(b.life, 0.4);
+              } else dead = true;
+            } else dead = true;
+          }
+          break;
+        }
+      }
+    }
+
+
+    if (dead) bullets.splice(i, 1);
+  }
+}
+
+
+function updatePickups(dt) {
+  for (let i = pickups.length - 1; i >= 0; i--) {
+    const p = pickups[i];
+    p.life -= dt;
+    p.bob += dt * 4;
+
+
+    if (dist(p.x, p.y, player.x, player.y) < p.r + 22) {
+      if (p.gemValue) {
+        gems += p.gemValue;
+        addToast(`+${p.gemValue} 💎`, '#ffd85e');
+      } else {
+        player.hp = Math.min(player.maxHp, player.hp + 30);
+        addToast('+30 HP', '#7dff9b');
+      }
+      pickups.splice(i, 1);
+      continue;
+    }
+    if (p.life <= 0) pickups.splice(i, 1);
+  }
+}
+
+
+function updateParticles(dt) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.life -= dt;
+    if (p.life <= 0) { particles.splice(i, 1); continue; }
+    const drag = Math.exp(-(p.drag || 0) * dt);
+    p.vx *= drag;
+    p.vy *= drag;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+  }
+}
+
+
+function updateDecals(dt) {
+  for (let i = decals.length - 1; i >= 0; i--) {
+    decals[i].life -= dt;
+    if (decals[i].life <= 0) decals.splice(i, 1);
+  }
+}
+
+
+function updateShake(dt) {
+  if (shakeT > 0) {
+    shakeT -= dt;
+    shakeMag *= Math.pow(0.001, dt);
+    if (shakeT <= 0) shakeMag = 0;
+  }
+}
+
+
+function updateSpawning(dt) {
+  stage.spawnTimer -= dt;
+
+
+  // Boss every 3rd stage
+  if (stage.level % 2 === 0 && !stage.bossSpawned && stage.spawnTimer <= 0) {
+    spawnZombie(pickBossType(stage.level));
+    stage.bossSpawned = true;
+    stage.spawnTimer = 0.9;
+  }
+
+
+  const cap = Math.min(42, 14 + stage.level * 2);
+  if (stage.remaining > 0 && stage.spawnTimer <= 0 && zombies.length < cap) {
+    spawnZombie();
+    stage.remaining--;
+    stage.spawnTimer = stage.interval;
+  }
+
+
+  if (stage.remaining === 0 && zombies.length === 0) {
+    if (!stage.cleared) {
+      stage.cleared = true;
+      stage.completeTimer = 2.2;
+      const bonus = 40 + stage.level * 20;
+      gainXP(bonus);
+      runScore += 100 * stage.level;
+      player.hp = Math.min(player.maxHp, player.hp + 25);
+      princess.hp = Math.min(princess.maxHp, princess.hp + 25);
+      gems += 5;
+      addToast(`STAGE ${stage.level} CLEARED! +${bonus} XP +5💎`, '#ffe066');
+      bestStage = Math.max(bestStage, stage.level);
+      save();
+    } else {
+      stage.completeTimer -= dt;
+      if (stage.completeTimer <= 0) startStage(stage.level + 1);
+    }
+  }
+}
+
+
+// ================================================================ INPUT
+window.addEventListener('keydown', (e) => {
+  const k = e.key.toLowerCase();
+  keys[k] = true;
+  if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) e.preventDefault();
+  if (e.repeat) return;
+  handleAction(k);
+});
+window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+window.addEventListener('blur', () => { if (mode === 'playing') mode = 'paused'; });
+
+
+// --- guarantee a save even if the tab is closed or refreshed mid-run
+window.addEventListener('beforeunload', () => save());
+window.addEventListener('pagehide', () => save());
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) save();
+});
+
+
+function canvasPosFromEvent(clientX, clientY) {
+  const r = canvas.getBoundingClientRect();
+  return {
+    x: (clientX - r.left) * (W() / r.width),
+    y: (clientY - r.top) * (H() / r.height),
+  };
+}
+
+
+canvas.addEventListener('mousemove', (e) => {
+  const p = canvasPosFromEvent(e.clientX, e.clientY);
+  mouse.x = p.x;
+  mouse.y = p.y;
+});
+
+
+canvas.addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return;
+  mouse.down = true;
+  const p = canvasPosFromEvent(e.clientX, e.clientY);
+  mouse.x = p.x;
+  mouse.y = p.y;
+  if (mode !== 'playing') {
+    checkHit(p.x, p.y);
+  }
+});
+window.addEventListener('mouseup', (e) => { if (e.button === 0) mouse.down = false; });
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+
+// touch
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    const p = canvasPosFromEvent(t.clientX, t.clientY);
+    mouse.x = p.x;
+    mouse.y = p.y;
+
+
+    if (mode !== 'playing') {
+      checkHit(p.x, p.y);
+      continue;
+    }
+
+
+    // weapon slot tap
+    const slot = weaponSlotAt(p.x, p.y);
+    if (slot >= 0) {
+      selectWeapon(slot);
+      continue;
+    }
+
+
+    if (p.x < W() / 2) {
+      if (!touchState.move) touchState.move = { id: t.identifier, ox: p.x, oy: p.y, dx: 0, dy: 0 };
+    } else {
+      if (!touchState.aim) touchState.aim = { id: t.identifier, ox: p.x, oy: p.y, dx: 0, dy: 0 };
+    }
+  }
+}, { passive: false });
+
+
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    const p = canvasPosFromEvent(t.clientX, t.clientY);
+    for (const key of ['move', 'aim']) {
+      const s = touchState[key];
+      if (s && s.id === t.identifier) {
+        s.dx = p.x - s.ox;
+        s.dy = p.y - s.oy;
+      }
+    }
+  }
+}, { passive: false });
+
+
+function endTouch(e) {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    for (const key of ['move', 'aim']) {
+      const s = touchState[key];
+      if (s && s.id === t.identifier) touchState[key] = null;
+    }
+  }
+}
+canvas.addEventListener('touchend', endTouch, { passive: false });
+canvas.addEventListener('touchcancel', endTouch, { passive: false });
+
+
+// UI hit testing
+function checkHit(x, y) {
+  for (let i = hitAreas.length - 1; i >= 0; i--) {
+    const a = hitAreas[i];
+    if (x >= a.x && x <= a.x + a.w && y >= a.y && y <= a.y + a.h) {
+      a.fn();
+      return;
+    }
+  }
+}
+
+
+function weaponSlotAt(x, y) {
+  if (mode !== 'playing') return -1;
+  const slotW = 64, gap = 4;
+  let total = WEAPONS.length * slotW + (WEAPONS.length - 1) * gap;
+  const maxW = W() - 20;
+  const scale = total > maxW ? maxW / total : 1;
+  const sw = slotW * scale, gp = gap * scale;
+  total = WEAPONS.length * sw + (WEAPONS.length - 1) * gp;
+  let sx = (W() - total) / 2;
+  const sy = H() - 44;
+  for (let i = 0; i < WEAPONS.length; i++) {
+    if (x >= sx && x <= sx + sw && y >= sy && y <= sy + 36) return i;
+    sx += sw + gp;
+  }
+  return -1;
+}
+
+
+// ================================================================ ACTIONS
+function handleAction(k) {
+  // Ad screen swallows input
+  if (adActive) return;
+
+
+  if (mode === 'shop' || mode === 'princess_shop' || mode === 'skins' ||
+      mode === 'skins_princess' || mode === 'leaderboard' || mode === 'gems') {
+    if (k === 'escape' || k === 'k') {
+      mode = (prevMode === 'playing') ? 'paused' : prevMode;
+      return;
+    }
+    if (mode === 'skins') {
+      if (k === 'a' || k === 'arrowleft') skinCursor = (skinCursor - 1 + SKINS.length) % SKINS.length;
+      if (k === 'd' || k === 'arrowright') skinCursor = (skinCursor + 1) % SKINS.length;
+      if (k === 'enter' || k === ' ') tryEquipKnightSkin(skinCursor);
+    }
+    if (mode === 'skins_princess') {
+      if (k === 'a' || k === 'arrowleft') princessCursor = (princessCursor - 1 + PRINCESS_SKINS.length) % PRINCESS_SKINS.length;
+      if (k === 'd' || k === 'arrowright') princessCursor = (princessCursor + 1) % PRINCESS_SKINS.length;
+      if (k === 'enter' || k === ' ') buyPrincessSkin(princessCursor);
+    }
+    if (mode === 'shop') {
+      if (k === 'a' || k === 'arrowleft') weaponShopCursor = (weaponShopCursor - 1 + WEAPONS.length) % WEAPONS.length;
+      if (k === 'd' || k === 'arrowright') weaponShopCursor = (weaponShopCursor + 1) % WEAPONS.length;
+      if (k === 'enter' || k === ' ') buyWeapon(weaponShopCursor);
+    }
+    return;
+  }
+
+
+  if (mode === 'menu') {
+    if (k === 'enter' || k === ' ') startGame();
+    else if (k === 'k') { prevMode = 'menu'; skinCursor = skinIndex; mode = 'skins'; }
+    else if (k === 'm') { prevMode = 'menu'; princessCursor = princessSkinIndex; mode = 'skins_princess'; }
+    else if (k === 's') { prevMode = 'menu'; mode = 'shop'; }
+    else if (k === 'g') { prevMode = 'menu'; mode = 'gems'; }
+    else if (k === 'l') { prevMode = 'menu'; mode = 'leaderboard'; }
+    return;
+  }
+
+
+  if (mode === 'gameover') {
+    if (k === 'r' || k === 'enter') startGame();
+    else if (k === 'escape') mode = 'menu';
+    else if (k === 'l') { prevMode = 'gameover'; mode = 'leaderboard'; }
+    else if (k === 's') { prevMode = 'gameover'; mode = 'shop'; }
+    else if (k === 'g') { prevMode = 'gameover'; mode = 'gems'; }
+    return;
+  }
+
+
+  if (mode === 'paused') {
+    if (k === 'p' || k === 'escape') mode = 'playing';
+    else if (k === 'r') startGame();
+    else if (k === 'k') { prevMode = 'paused'; skinCursor = skinIndex; mode = 'skins'; }
+    else if (k === 'm') { prevMode = 'paused'; princessCursor = princessSkinIndex; mode = 'skins_princess'; }
+    else if (k === 's') { prevMode = 'paused'; mode = 'shop'; }
+    else if (k === 'g') { prevMode = 'paused'; mode = 'gems'; }
+    else if (k === 'l') { prevMode = 'paused'; mode = 'leaderboard'; }
+    return;
+  }
+
+
+  if (mode === 'playing') {
+    if (k === 'p' || k === 'escape') { mode = 'paused'; return; }
+    if (k === 'k') { prevMode = 'playing'; skinCursor = skinIndex; mode = 'skins'; return; }
+    if (k === 'm') { prevMode = 'playing'; princessCursor = princessSkinIndex; mode = 'skins_princess'; return; }
+    if (k === 's') { prevMode = 'playing'; mode = 'shop'; return; }
+    if (k === 'g') { prevMode = 'playing'; mode = 'gems'; return; }
+    if (k === 'l') { prevMode = 'playing'; mode = 'leaderboard'; return; }
+    if (k >= '1' && k <= '9') selectWeapon(parseInt(k, 10) - 1);
+    if (k === '0') selectWeapon(9);
+    if (k === 'q') cycleWeapon(-1);
+    if (k === 'e') cycleWeapon(1);
+  }
+}
+
+
+function selectWeapon(i) {
+  const w = WEAPONS[i];
+  if (!w) return;
+  if (!unlockedWeapons.includes(w.id)) {
+    if (w.gemCost > 0) addToast(`${w.name} — ${w.gemCost} 💎 (press S)`, '#ff8f8f');
+    else addToast(`${w.name} unlocks at level ${w.unlock}`, '#ff8f8f');
+    return;
+  }
+  player.wIdx = i;
+  player.cd = Math.max(player.cd, 0.12);
+}
+
+
+function cycleWeapon(dir) {
+  for (let step = 1; step <= WEAPONS.length; step++) {
+    const i = (player.wIdx + dir * step + WEAPONS.length * 4) % WEAPONS.length;
+    if (unlockedWeapons.includes(WEAPONS[i].id)) { selectWeapon(i); return; }
+  }
+}
+
+
+function buyWeapon(i) {
+  const w = WEAPONS[i];
+  if (!w) return;
+  if (unlockedWeapons.includes(w.id)) {
+    if (mode === 'playing') selectWeapon(i);
+    return;
+  }
+  if (w.gemCost === 0) { addToast(`Unlocks at level ${w.unlock}`, '#ff8f8f'); return; }
+  if (gems < w.gemCost) { addToast(`Need ${w.gemCost} 💎!`, '#ff8f8f'); return; }
+  gems -= w.gemCost;
+  unlockedWeapons.push(w.id);
+  addToast(`Bought ${w.name}!`, '#7dff9b');
+  save();
+}
+
+
+function tryEquipKnightSkin(i) {
+  const s = SKINS[i];
+  if (unlockedKnightSkins.includes(i)) {
+    skinIndex = i;
+    addToast(`${s.name} equipped!`, '#c9a0ff');
+    save();
+    return;
+  }
+  if (s.gemCost === 0 && s.unlock > maxLevel) {
+    addToast(`Unlocks at level ${s.unlock}`, '#ff8f8f');
+    return;
+  }
+  if (s.gemCost > 0) {
+    if (gems < s.gemCost) { addToast(`Need ${s.gemCost} 💎!`, '#ff8f8f'); return; }
+    gems -= s.gemCost;
+    unlockedKnightSkins.push(i);
+    skinIndex = i;
+    addToast(`Bought ${s.name}!`, '#7dff9b');
+    save();
+    return;
+  }
+  unlockedKnightSkins.push(i);
+  skinIndex = i;
+  save();
+}
+
+
+function buyPrincessSkin(i) {
+  const s = PRINCESS_SKINS[i];
+  if (unlockedPrincessSkins.includes(i)) {
+    princessSkinIndex = i;
+    addToast(`${s.name} equipped!`, '#ff9ec4');
+    save();
+    return;
+  }
+  if (s.gemCost === 0) {
+    unlockedPrincessSkins.push(i);
+    princessSkinIndex = i;
+    save();
+    return;
+  }
+  if (gems < s.gemCost) { addToast(`Need ${s.gemCost} 💎!`, '#ff8f8f'); return; }
+  gems -= s.gemCost;
+  unlockedPrincessSkins.push(i);
+  princessSkinIndex = i;
+  addToast(`Bought ${s.name}!`, '#ff9ec4');
+  save();
+}
+
+
+// --------------------------------------------------------------- AD SYSTEM
+function startAd() {
+  if (adTimer > 0 || adActive) return;
+  adActive = true;
+  adRewardPending = 3.0; // 3-second simulated ad
+  adTimer = 20; // 20s cooldown
+}
+
+
+// -------------------------------------------------------------- GEM SHOP
+function buyGemsPack(amount, cost) {
+  // [DEMO] — this is where you'd call Google Play Billing / StoreKit
+  gems += amount;
+  addToast(`[DEMO] +${amount} 💎 (would charge $${cost})`, '#7dff9b');
+  save();
+}
+
+
+// ================================================================ DRAW HELPERS
+function drawBar(x, y, w, h, frac, bg, fg) {
+  frac = clamp(frac, 0, 1);
+  ctx.fillStyle = bg;
+  roundRect(x, y, w, h, h / 2); ctx.fill();
+  if (w * frac > 1) {
+    ctx.fillStyle = fg;
+    roundRect(x, y, w * frac, h, h / 2); ctx.fill();
+  }
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+  ctx.lineWidth = 1;
+  roundRect(x, y, w, h, h / 2); ctx.stroke();
+}
+
+
+// ================================================================ DRAW WORLD
+function drawBackground() {
+  const grad = ctx.createRadialGradient(W() / 2, H() / 2, 60, W() / 2, H() / 2, Math.max(W(), H()) * 0.72);
+  grad.addColorStop(0, '#1a2333');
+  grad.addColorStop(1, '#080b12');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W(), H());
+
+
+  ctx.strokeStyle = 'rgba(120,170,255,0.05)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = 0; x <= W(); x += 48) { ctx.moveTo(x, 0); ctx.lineTo(x, H()); }
+  for (let y = 0; y <= H(); y += 48) { ctx.moveTo(0, y); ctx.lineTo(W(), y); }
+  ctx.stroke();
+
+
+  ctx.strokeStyle = 'rgba(140,190,255,0.16)';
+  ctx.lineWidth = 3;
+  roundRect(PAD * 0.5, PAD * 0.5, W() - PAD, H() - PAD, 18);
+  ctx.stroke();
+}
+
+
+function drawWorld() {
+  for (const d of decals) {
+    ctx.globalAlpha = clamp(d.life / d.max, 0, 1) * 0.45;
+    ctx.fillStyle = '#5a0f1c';
+    ctx.beginPath();
+    ctx.ellipse(d.x, d.y, d.r, d.r * 0.6, d.rot, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+
+  for (const p of pickups) drawPickup(p);
+  for (const z of zombies) if (!z.dead) drawZombie(z);
+  for (const s of soldiers) drawSoldier(s);
+
+
+  drawPrincess();
+  drawPlayer();
+
+
+  for (const b of bullets) {
+    ctx.shadowBlur = 12;
+    ctx.shadowColor = b.color;
+    ctx.fillStyle = b.color;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.shadowBlur = 0;
+
+
+  for (const p of particles) {
+    const a = clamp(p.life / p.max, 0, 1);
+    ctx.globalAlpha = a;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r * (0.4 + a * 0.8), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+
+function drawPlayerOriginal() {
+  const s = SKINS[skinIndex];
+  const p = player;
+  if (!p) return;
+  const w = WEAPONS[p.wIdx];
+
+
+  ctx.save();
+  ctx.translate(p.x, p.y);
+
+
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath();
+  ctx.ellipse(0, p.r * 0.9, p.r * 1.05, p.r * 0.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+
+  ctx.save();
+  ctx.rotate(p.angle);
+  if (w.melee) {
+    ctx.fillStyle = '#8b6b3f';
+    ctx.fillRect(p.r - 6, -4, 9, 8);
+    ctx.fillStyle = '#e8eef7';
+    ctx.fillRect(p.r + 3, -2.5, 26, 5);
+  } else {
+    ctx.fillStyle = '#2a2f3a';
+    ctx.fillRect(p.r - 5, -4, 21, 8);
+    ctx.fillStyle = w.color;
+    ctx.fillRect(p.r + 14, -2.5, 8, 5);
+  }
+  ctx.restore();
+
+
+  ctx.save();
+  ctx.rotate(p.angle + Math.PI);
+  ctx.fillStyle = s.cape;
+  ctx.beginPath();
+  ctx.ellipse(9, 0, 13, 10, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+
+  ctx.beginPath();
+  ctx.arc(0, 0, p.r, 0, Math.PI * 2);
+  ctx.fillStyle = p.flash > 0 ? '#ff8a8a' : s.body;
+  ctx.fill();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = s.trim;
+  ctx.stroke();
+
+
+  ctx.beginPath();
+  ctx.arc(0, -1, p.r * 0.72, Math.PI, Math.PI * 2);
+  ctx.fillStyle = s.trim;
+  ctx.fill();
+
+
+  if (p.swing > 0 && w.melee) {
+    const t = p.swing / 0.18;
+    ctx.save();
+    ctx.rotate(p.angle);
+    ctx.globalAlpha = t * 0.55;
+    ctx.strokeStyle = '#dff2ff';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.arc(0, 0, w.range * 0.82, -w.arc, w.arc);
+    ctx.stroke();
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+
+  ctx.restore();
+}
+
+
+function drawPrincessOriginal() {
+  const pr = princess;
+  if (!pr) return;
+  const s = PRINCESS_SKINS[princessSkinIndex];
+
+
+  ctx.save();
+  ctx.translate(pr.x, pr.y);
+
+
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath();
+  ctx.ellipse(0, 16, 13, 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+
+  ctx.fillStyle = pr.flash > 0 ? '#ffd9e5' : s.dress;
+  ctx.beginPath();
+  ctx.moveTo(0, -8);
+  ctx.lineTo(15, 16);
+  ctx.lineTo(-15, 16);
+  ctx.closePath();
+  ctx.fill();
+
+
+  ctx.fillStyle = s.hair;
+  ctx.beginPath();
+  ctx.arc(0, -13, 10, 0, Math.PI * 2);
+  ctx.fill();
+
+
+  ctx.fillStyle = '#f7d7b6';
+  ctx.beginPath();
+  ctx.arc(0, -13, 8, 0, Math.PI * 2);
+  ctx.fill();
+
+
+  ctx.fillStyle = '#3a2a2a';
+  ctx.beginPath(); ctx.arc(-3, -13, 1.4, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc( 3, -13, 1.4, 0, Math.PI * 2); ctx.fill();
+
+
+  ctx.fillStyle = s.crown;
+  ctx.beginPath();
+  ctx.moveTo(-8, -21);
+  ctx.lineTo(-5, -28);
+  ctx.lineTo(-2, -22);
+  ctx.lineTo( 1, -28);
+  ctx.lineTo( 4, -22);
+  ctx.lineTo( 7, -28);
+  ctx.lineTo( 8, -21);
+  ctx.closePath();
+  ctx.fill();
+
+
+  ctx.restore();
+}
+
+
+function drawZombie(z) {
+  const t = ZOMBIE_TYPES[z.type];
+  const fa = z.face || 0;
+  const isBoss = t.boss;
+
+
+  ctx.save();
+  ctx.translate(z.x, z.y);
+
+
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath();
+  ctx.ellipse(0, z.r * 0.8, z.r, z.r * 0.45, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+
+  const armSwing = Math.sin(z.wob) * 0.35;
+  ctx.strokeStyle = t.dark;
+  ctx.lineWidth = z.r * 0.34;
+  ctx.lineCap = 'round';
+  for (const s of [-1, 1]) {
+    const a = fa + s * (0.6 + armSwing);
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * z.r * 0.4, Math.sin(a) * z.r * 0.4);
+    ctx.lineTo(Math.cos(a) * z.r * 1.5, Math.sin(a) * z.r * 1.5);
+    ctx.stroke();
+  }
+
+
+  ctx.beginPath();
+  ctx.arc(0, 0, z.r, 0, Math.PI * 2);
+  ctx.fillStyle = z.flash > 0 ? '#ffffff' : t.color;
+  ctx.fill();
+  ctx.lineWidth = isBoss ? 5 : 3;
+  ctx.strokeStyle = isBoss ? '#ffe066' : t.dark;
+  ctx.stroke();
+
+
+  ctx.fillStyle = isBoss ? '#ffe066' : '#ff3b3b';
+  for (const s of [-1, 1]) {
+    const a = fa + s * 0.45;
+    ctx.beginPath();
+    ctx.arc(Math.cos(a) * z.r * 0.45, Math.sin(a) * z.r * 0.45, z.r * 0.14, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+
+  if (z.hp < z.maxHp) {
+    const bw = z.r * 2.4, bh = isBoss ? 6 : 4;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(-bw / 2, -z.r - 15, bw, bh);
+    ctx.fillStyle = isBoss ? '#ff4d6d' : '#7dff9b';
+    ctx.fillRect(-bw / 2, -z.r - 15, bw * clamp(z.hp / z.maxHp, 0, 1), bh);
+  }
+
+
+  ctx.restore();
+}
+
+
+function drawSoldier(s) {
+  ctx.save();
+  ctx.translate(s.x, s.y);
+
+
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath();
+  ctx.ellipse(0, s.r * 0.85, s.r, s.r * 0.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+
+  ctx.beginPath();
+  ctx.arc(0, 0, s.r, 0, Math.PI * 2);
+  ctx.fillStyle = s.flash > 0 ? '#ffffff' : '#8fa0c0';
+  ctx.fill();
+  ctx.strokeStyle = '#4a5878';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+
+  ctx.fillStyle = '#5c7099';
+  ctx.beginPath();
+  ctx.arc(0, 0, s.r * 0.55, Math.PI, Math.PI * 2);
+  ctx.fill();
+
+
+  ctx.save();
+  ctx.rotate(s.wob);
+  ctx.fillStyle = '#c0c8d8';
+  ctx.fillRect(s.r - 2, -2, 10, 4);
+  ctx.restore();
+
+
+  ctx.restore();
+}
+
+
+function drawPickup(p) {
+  const bob = Math.sin(p.bob) * 3;
+  const s = 1 + Math.sin(p.bob * 2) * 0.06;
+
+
+  ctx.save();
+  ctx.translate(p.x, p.y + bob);
+  ctx.scale(s, s);
+
+
+  if (p.gemValue) {
+    ctx.shadowBlur = 14;
+    ctx.shadowColor = '#ffd85e';
+    ctx.fillStyle = '#ffd85e';
+    ctx.beginPath();
+    ctx.moveTo(0, -10);
+    ctx.lineTo(7, 0);
+    ctx.lineTo(0, 10);
+    ctx.lineTo(-7, 0);
+    ctx.closePath();
+    ctx.fill();
+  } else {
+    ctx.shadowBlur = 12;
+    ctx.shadowColor = '#ff4d6d';
+    ctx.fillStyle = '#ff4d6d';
+    ctx.beginPath();
+    ctx.moveTo(0, 6);
+    ctx.bezierCurveTo(-14, -4, -7, -16, 0, -8);
+    ctx.bezierCurveTo(7, -16, 14, -4, 0, 6);
+    ctx.fill();
+  }
+  ctx.restore();
+  ctx.shadowBlur = 0;
+}
+
+
+// ================================================================ HUD
+function drawHUD() {
+  if (!player) return;
+
+
+  // top bar
+  ctx.fillStyle = 'rgba(8,11,18,0.78)';
+  ctx.fillRect(0, 0, W(), 52);
+  ctx.strokeStyle = 'rgba(120,170,255,0.15)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, 52); ctx.lineTo(W(), 52); ctx.stroke();
+
+
+  // Left: HP + XP
+  drawBar(12, 8, 190, 13, player.hp / player.maxHp, '#3a1520', '#ff5c72');
+  ctx.textAlign = 'left';
+  ctx.font = 'bold 10px system-ui, sans-serif';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(`HP ${Math.max(0, Math.ceil(player.hp))}/${player.maxHp}`, 18, 18);
+
+
+  drawBar(12, 26, 190, 9, player.xp / player.xpNext, '#3a2f10', '#f5c542');
+  ctx.font = '9px system-ui, sans-serif';
+  ctx.fillStyle = '#c9b06a';
+  ctx.fillText(`XP ${Math.floor(player.xp)}/${player.xpNext}`, 18, 47);
+
+
+  // LV badge
+  ctx.font = 'bold 18px system-ui, sans-serif';
+  ctx.fillStyle = '#ffe066';
+  ctx.fillText(`LV ${player.level}`, 212, 30);
+
+
+  // Right: stage + live score + stats
+  ctx.textAlign = 'right';
+
+
+  ctx.font = 'bold 14px system-ui, sans-serif';
+  ctx.fillStyle = '#8ecbff';
+  ctx.fillText(`STAGE ${stage.level} • ${difficulty.toUpperCase()}`, W() - 12, 18);
+
+
+  ctx.font = 'bold 15px system-ui, sans-serif';
+  ctx.fillStyle = '#ffe066';
+  ctx.fillText(`SCORE ${runScore}`, W() - 12, 36);
+
+
+  ctx.font = '10px system-ui, sans-serif';
+  ctx.fillStyle = '#9fb0c8';
+  ctx.fillText(
+    `Left ${stage.remaining + zombies.length} • Kills ${player.kills} • 💎 ${gems}`,
+    W() - 12, 48
+  );
+
+
+  // save badge
+  if (saveFlash > 0) {
+    ctx.globalAlpha = Math.min(1, saveFlash);
+    ctx.textAlign = 'left';
+    ctx.font = 'bold 10px system-ui, sans-serif';
+    ctx.fillStyle = '#7dff9b';
+    ctx.fillText('💾 SAVED', 12, 66);
+    ctx.globalAlpha = 1;
+    ctx.textAlign = 'right';
+  }
+
+
+  // Princess HP bottom left
+  ctx.textAlign = 'left';
+  ctx.font = 'bold 10px system-ui, sans-serif';
+  ctx.fillStyle = '#ff9ec4';
+  ctx.fillText('PRINCESS', 12, H() - 60);
+  drawBar(12, H() - 56, 160, 10, princess.hp / princess.maxHp, '#3a1525', '#e75480');
+
+
+  // Army counter
+  ctx.font = 'bold 10px system-ui, sans-serif';
+  ctx.fillStyle = '#8fa0c0';
+  ctx.fillText(`ARMY ${soldiers.length}/9`, 12, H() - 34);
+
+
+  // Weapon slots bottom center
+  const slotW = 64, gap = 4;
+  let total = WEAPONS.length * slotW + (WEAPONS.length - 1) * gap;
+  const maxW = W() - 20;
+  const scale = total > maxW ? maxW / total : 1;
+  const sw = slotW * scale, gp = gap * scale;
+  total = WEAPONS.length * sw + (WEAPONS.length - 1) * gp;
+  let sx = (W() - total) / 2;
+  const sy = H() - 44;
+
+
+  for (let i = 0; i < WEAPONS.length; i++) {
+    const wpn = WEAPONS[i];
+    const owned = unlockedWeapons.includes(wpn.id);
+    const active = i === player.wIdx;
+
+
+    ctx.fillStyle = active ? 'rgba(255,224,102,0.22)' : 'rgba(10,14,22,0.75)';
+    roundRect(sx, sy, sw, 36, 6); ctx.fill();
+
+
+    ctx.lineWidth = active ? 2 : 1;
+    ctx.strokeStyle = active
+      ? '#ffe066'
+      : (owned ? 'rgba(140,190,255,0.35)' : 'rgba(255,255,255,0.07)');
+    roundRect(sx, sy, sw, 36, 6); ctx.stroke();
+
+
+    ctx.textAlign = 'left';
+    ctx.font = '8px system-ui, sans-serif';
+    ctx.fillStyle = '#7f8ea6';
+    const label = i < 10 ? String(i + 1) : '0';
+    ctx.fillText(label, sx + 4, sy + 11);
+
+
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 9px system-ui, sans-serif';
+    if (owned) {
+      ctx.fillStyle = active ? '#ffe066' : '#c8d6ea';
+      ctx.fillText(wpn.short, sx + sw / 2, sy + 24);
+    } else {
+      ctx.fillStyle = '#556178';
+      if (wpn.gemCost > 0) {
+        ctx.fillText('👑', sx + sw / 2, sy + 13);
+        ctx.fillStyle = '#ffd85e';
+        ctx.fillText(String(wpn.gemCost), sx + sw / 2, sy + 28);
+      } else {
+        ctx.fillText('LV', sx + sw / 2, sy + 13);
+        ctx.fillStyle = '#3f4a5e';
+        ctx.fillText(String(wpn.unlock), sx + sw / 2, sy + 28);
+      }
+    }
+    sx += sw + gp;
+  }
+  ctx.textAlign = 'left';
+
+
+  drawToasts();
+}
+
+
+function drawToasts() {
+  ctx.textAlign = 'center';
+  for (let i = 0; i < toasts.length; i++) {
+    const t = toasts[i];
+    const a = Math.min(1, t.life / 0.6);
+    const y = 78 + i * 24;
+
+
+    ctx.globalAlpha = a * 0.6;
+    ctx.font = 'bold 15px system-ui, sans-serif';
+    ctx.fillStyle = '#000';
+    ctx.fillText(t.text, W() / 2 + 1, y + 1);
+
+
+    ctx.globalAlpha = a;
+    ctx.fillStyle = t.color;
+    ctx.fillText(t.text, W() / 2, y);
+    ctx.globalAlpha = 1;
+  }
+  ctx.textAlign = 'left';
+}
+
+
+function drawSticks() {
+  if (mode !== 'playing') return;
+  for (const key of ['move', 'aim']) {
+    const s = touchState[key];
+    if (!s) continue;
+
+
+    ctx.globalAlpha = 0.14;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.arc(s.ox, s.oy, STICK_RADIUS, 0, Math.PI * 2); ctx.fill();
+
+
+    ctx.globalAlpha = 0.35;
+    ctx.strokeStyle = key === 'aim' ? '#ff9b57' : '#8ecbff';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(s.ox, s.oy, STICK_RADIUS, 0, Math.PI * 2); ctx.stroke();
+
+
+    const d = Math.hypot(s.dx, s.dy);
+    const k = d > STICK_RADIUS ? STICK_RADIUS / d : 1;
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = key === 'aim' ? '#ff9b57' : '#8ecbff';
+    ctx.beginPath(); ctx.arc(s.ox + s.dx * k, s.oy + s.dy * k, 22, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+}
+
+
+// ================================================================ OVERLAYS
+function drawDim() {
+  ctx.fillStyle = 'rgba(5,8,14,0.92)';
+  ctx.fillRect(0, 0, W(), H());
+}
+
+
+function drawButton(x, y, w, h, label, color, fn, sub) {
+  ctx.fillStyle = 'rgba(12,18,30,0.92)';
+  roundRect(x, y, w, h, 9); ctx.fill();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  roundRect(x, y, w, h, 9); ctx.stroke();
+
+
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 15px system-ui, sans-serif';
+  ctx.fillStyle = color;
+  ctx.fillText(label, x + w / 2, y + h / 2 + (sub ? -2 : 5));
+  if (sub) {
+    ctx.font = '10px system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.fillText(sub, x + w / 2, y + h / 2 + 13);
+  }
+  ctx.textAlign = 'left';
+
+
+  addHit(x, y, w, h, fn);
+}
+
+
+function drawMenuOriginal() {
+  drawDim();
+
+
+  ctx.strokeStyle = 'rgba(140,190,255,0.10)';
+  ctx.lineWidth = 2;
+  roundRect(20, 20, W() - 40, H() - 40, 24);
+  ctx.stroke();
+
+
+  ctx.textAlign = 'center';
+
+
+  const titleY = H() * 0.13;
+  ctx.font = `bold ${Math.min(44, W() / 15)}px system-ui, sans-serif`;
+  ctx.fillStyle = '#ffe066';
+  ctx.shadowBlur = 24; ctx.shadowColor = 'rgba(255,224,102,0.5)';
+  ctx.fillText('KNIGHT & PRINCESS', W() / 2, titleY);
+  ctx.shadowBlur = 0;
+
+
+  ctx.font = `bold ${Math.min(20, W() / 30)}px system-ui, sans-serif`;
+  ctx.fillStyle = '#ff6b8a';
+  ctx.fillText('Z O M B I E S I E G E', W() / 2, titleY + 30);
+
+
+  // stats
+  ctx.font = '12px system-ui, sans-serif';
+  ctx.fillStyle = '#9fb0c8';
+  ctx.fillText(`💎 ${gems} 🏆 Best: ${highScore} Best stage: ${bestStage} LV ${maxLevel}`,
+               W() / 2, titleY + 54);
+
+
+  if (!storageOK) {
+    ctx.font = 'bold 11px system-ui, sans-serif';
+    ctx.fillStyle = '#ff6b6b';
+    ctx.fillText('⚠ This browser is blocking saves — try a normal (non-private) window',
+                 W() / 2, titleY + 72);
+  }
+
+
+  // main buttons
+  const bw = Math.min(240, W() - 60);
+  const bh = 40;
+  const cx = W() / 2 - bw / 2;
+  let by = titleY + 88;
+
+
+  drawButton(cx, by, bw, bh, '▶ START GAME', '#7dff9b', () => startGame(), 'Enter');
+  by += bh + 8;
+  drawButton(cx, by, bw, bh, '🛒 WEAPON SHOP', '#8ecbff', () => { prevMode = 'menu'; mode = 'shop'; }, 'S');
+  by += bh + 8;
+  drawButton(cx, by, bw, bh, '👑 GEM STORE', '#ffd85e', () => { prevMode = 'menu'; mode = 'gems'; }, 'G');
+  by += bh + 8;
+  drawButton(cx, by, bw, bh, '🛡 KNIGHT SKINS', '#c9a0ff', () => {
+    prevMode = 'menu'; skinCursor = skinIndex; mode = 'skins';
+  }, 'K');
+  by += bh + 8;
+  drawButton(cx, by, bw, bh, '💃 PRINCESS OUTFITS', '#ff9ec4', () => {
+    prevMode = 'menu'; princessCursor = princessSkinIndex; mode = 'skins_princess';
+  }, 'M');
+  by += bh + 8;
+  drawButton(cx, by, bw, bh, '🏆 LEADERBOARD', '#ffe066', () => { prevMode = 'menu'; mode = 'leaderboard'; }, 'L');
+
+
+  // Ad button at bottom
+  const adW = bw, adH = 40;
+  const adX = W() / 2 - adW / 2;
+  const adY = Math.min(H() - 60, by + bh + 14);
+
+
+  const adReady = adTimer <= 0 && !adActive;
+  drawButton(adX, adY, adW, adH,
+    adReady ? '📺 WATCH AD → +10-25 💎' : `⏳ AD IN ${Math.ceil(adTimer)}s`,
+    adReady ? '#ff9b57' : '#7f8ea6',
+    adReady ? startAd : () => {});
+
+
+  ctx.textAlign = 'left';
+}
+
+
+function drawSkinsKnight() {
+  drawDim();
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 30px system-ui, sans-serif';
+  ctx.fillStyle = '#c9a0ff';
+  ctx.fillText('KNIGHT SKINS', W() / 2, 46);
+
+
+  ctx.font = 'bold 16px system-ui, sans-serif';
+  ctx.fillStyle = '#ffd85e';
+  ctx.fillText(`💎 ${gems}`, W() / 2, 70);
+
+
+  const cols = Math.min(5, Math.max(3, Math.floor(W() / 130)));
+  const cardW = Math.min(120, (W() - 40) / cols - 8);
+  const gap = 8;
+  const cardH = cardW * 1.5;
+  const totalW = cols * cardW + (cols - 1) * gap;
+  const startX = (W() - totalW) / 2;
+  const startY = 88;
+
+
+  for (let i = 0; i < SKINS.length; i++) {
+    const s = SKINS[i];
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const x = startX + col * (cardW + gap);
+    const y = startY + row * (cardH + gap);
+
+
+    if (y + cardH > H() - 90) continue;
+
+
+    const unlocked = unlockedKnightSkins.includes(i);
+    const active = i === skinIndex;
+
+
+    ctx.fillStyle = active ? 'rgba(140,90,220,0.25)' : 'rgba(12,18,30,0.85)';
+    roundRect(x, y, cardW, cardH, 10); ctx.fill();
+
+
+    ctx.lineWidth = active ? 3 : 1.5;
+    ctx.strokeStyle = active ? '#c9a0ff' : (unlocked ? 'rgba(140,190,255,0.3)' : 'rgba(255,255,255,0.08)');
+    roundRect(x, y, cardW, cardH, 10); ctx.stroke();
+
+
+    const mx = x + cardW / 2, my = y + cardH * 0.36;
+    ctx.globalAlpha = unlocked ? 1 : 0.35;
+    ctx.fillStyle = s.cape;
+    ctx.beginPath(); ctx.ellipse(mx, my + 22, cardW * 0.22, cardW * 0.16, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(mx, my, cardW * 0.22, 0, Math.PI * 2);
+    ctx.fillStyle = s.body; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = s.trim; ctx.stroke();
+    ctx.beginPath(); ctx.arc(mx, my - 2, cardW * 0.16, Math.PI, Math.PI * 2);
+    ctx.fillStyle = s.trim; ctx.fill();
+    ctx.globalAlpha = 1;
+
+
+    ctx.font = 'bold 10px system-ui, sans-serif';
+    ctx.fillStyle = unlocked ? (active ? '#e8d9ff' : '#c2cfe2') : '#8f9fb8';
+    wrapText(s.name, mx, y + cardH * 0.64, cardW - 10, 12);
+
+
+    if (unlocked) {
+      ctx.font = 'bold 10px system-ui, sans-serif';
+      ctx.fillStyle = active ? '#7dff9b' : '#556178';
+      ctx.fillText(active ? 'EQUIPPED' : 'OWNED', mx, y + cardH - 14);
+    } else if (s.gemCost > 0) {
+      ctx.font = 'bold 12px system-ui, sans-serif';
+      ctx.fillStyle = '#ffd85e';
+      ctx.fillText(`💎 ${s.gemCost}`, mx, y + cardH - 14);
+    } else {
+      ctx.font = 'bold 10px system-ui, sans-serif';
+      ctx.fillStyle = '#556178';
+      ctx.fillText(`LV ${s.unlock}`, mx, y + cardH - 14);
+    }
+
+
+    addHit(x, y, cardW, cardH, () => tryEquipKnightSkin(i));
+  }
+
+
+  ctx.font = '12px system-ui, sans-serif';
+  ctx.fillStyle = '#8ecbff';
+  ctx.fillText('Tap a card to equip / buy', W() / 2, H() - 50);
+
+
+  const bw = 140, bh = 36;
+  drawButton(W() / 2 - bw / 2, H() - 42, bw, bh, 'CLOSE', '#c9a0ff',
+    () => { mode = prevMode === 'playing' ? 'paused' : prevMode; });
+  ctx.textAlign = 'left';
+}
+
+
+function drawSkinsPrincess() {
+  drawDim();
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 30px system-ui, sans-serif';
+  ctx.fillStyle = '#ff9ec4';
+  ctx.fillText('PRINCESS OUTFITS', W() / 2, 46);
+
+
+  ctx.font = 'bold 16px system-ui, sans-serif';
+  ctx.fillStyle = '#ffd85e';
+  ctx.fillText(`💎 ${gems}`, W() / 2, 70);
+
+
+  const cols = Math.min(4, Math.max(3, Math.floor(W() / 150)));
+  const cardW = Math.min(140, (W() - 40) / cols - 8);
+  const gap = 8;
+  const cardH = cardW * 1.6;
+  const totalW = cols * cardW + (cols - 1) * gap;
+  const startX = (W() - totalW) / 2;
+  const startY = 88;
+
+
+  for (let i = 0; i < PRINCESS_SKINS.length; i++) {
+    const s = PRINCESS_SKINS[i];
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const x = startX + col * (cardW + gap);
+    const y = startY + row * (cardH + gap);
+
+
+    if (y + cardH > H() - 90) continue;
+
+
+    const unlocked = unlockedPrincessSkins.includes(i);
+    const active = i === princessSkinIndex;
+
+
+    ctx.fillStyle = active ? 'rgba(255,158,196,0.2)' : 'rgba(12,18,30,0.85)';
+    roundRect(x, y, cardW, cardH, 10); ctx.fill();
+
+
+    ctx.lineWidth = active ? 3 : 1.5;
+    ctx.strokeStyle = active ? '#ff9ec4' : (unlocked ? 'rgba(140,190,255,0.3)' : 'rgba(255,255,255,0.08)');
+    roundRect(x, y, cardW, cardH, 10); ctx.stroke();
+
+
+    ctx.globalAlpha = unlocked ? 1 : 0.35;
+    const mx = x + cardW / 2, my = y + cardH * 0.4;
+
+
+    ctx.fillStyle = s.dress;
+    ctx.beginPath();
+    ctx.moveTo(mx, my - cardW * 0.06);
+    ctx.lineTo(mx + cardW * 0.2, my + cardW * 0.26);
+    ctx.lineTo(mx - cardW * 0.2, my + cardW * 0.26);
+    ctx.closePath();
+    ctx.fill();
+
+
+    ctx.fillStyle = s.hair;
+    ctx.beginPath();
+    ctx.arc(mx, my - cardW * 0.08, cardW * 0.13, 0, Math.PI * 2);
+    ctx.fill();
+
+
+    ctx.fillStyle = '#f7d7b6';
+    ctx.beginPath();
+    ctx.arc(mx, my - cardW * 0.08, cardW * 0.1, 0, Math.PI * 2);
+    ctx.fill();
+
+
+    ctx.fillStyle = s.crown;
+    ctx.beginPath();
+    ctx.moveTo(mx - cardW * 0.1, my - cardW * 0.16);
+    ctx.lineTo(mx - cardW * 0.06, my - cardW * 0.22);
+    ctx.lineTo(mx, my - cardW * 0.17);
+    ctx.lineTo(mx + cardW * 0.06, my - cardW * 0.22);
+    ctx.lineTo(mx + cardW * 0.1, my - cardW * 0.16);
+    ctx.closePath();
+    ctx.fill();
+
+
+    ctx.globalAlpha = 1;
+
+
+    ctx.font = 'bold 10px system-ui, sans-serif';
+    ctx.fillStyle = unlocked ? (active ? '#ffbcd0' : '#c2cfe2') : '#8f9fb8';
+    wrapText(s.name, mx, y + cardH * 0.72, cardW - 10, 12);
+
+
+    if (unlocked) {
+      ctx.font = 'bold 10px system-ui, sans-serif';
+      ctx.fillStyle = active ? '#7dff9b' : '#556178';
+      ctx.fillText(active ? 'EQUIPPED' : 'OWNED', mx, y + cardH - 14);
+    } else {
+      ctx.font = 'bold 12px system-ui, sans-serif';
+      ctx.fillStyle = '#ffd85e';
+      ctx.fillText(`💎 ${s.gemCost}`, mx, y + cardH - 14);
+    }
+
+
+    addHit(x, y, cardW, cardH, () => buyPrincessSkin(i));
+  }
+
+
+  ctx.font = '12px system-ui, sans-serif';
+  ctx.fillStyle = '#8ecbff';
+  ctx.fillText('Tap a card to equip / buy', W() / 2, H() - 50);
+
+
+  const bw = 140, bh = 36;
+  drawButton(W() / 2 - bw / 2, H() - 42, bw, bh, 'CLOSE', '#ff9ec4',
+    () => { mode = prevMode === 'playing' ? 'paused' : prevMode; });
+  ctx.textAlign = 'left';
+}
+
+
+function drawWeaponShop() {
+  drawDim();
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 30px system-ui, sans-serif';
+  ctx.fillStyle = '#8ecbff';
+  ctx.fillText('⚔ WEAPON SHOP', W() / 2, 46);
+
+
+  ctx.font = 'bold 16px system-ui, sans-serif';
+  ctx.fillStyle = '#ffd85e';
+  ctx.fillText(`💎 ${gems}`, W() / 2, 70);
+
+
+  const cols = Math.min(5, Math.max(3, Math.floor(W() / 130)));
+  const cardW = Math.min(120, (W() - 40) / cols - 8);
+  const gap = 8;
+  const cardH = cardW * 1.15;
+  const totalW = cols * cardW + (cols - 1) * gap;
+  const startX = (W() - totalW) / 2;
+  const startY = 86;
+
+
+  for (let i = 0; i < WEAPONS.length; i++) {
+    const w = WEAPONS[i];
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const x = startX + col * (cardW + gap);
+    const y = startY + row * (cardH + gap);
+
+
+    if (y + cardH > H() - 90) continue;
+
+
+    const owned = unlockedWeapons.includes(w.id);
+    const isPremium = w.gemCost > 0;
+
+
+    ctx.fillStyle = owned ? 'rgba(12,18,30,0.9)' : (isPremium ? 'rgba(40,20,10,0.9)' : 'rgba(15,18,25,0.9)');
+    roundRect(x, y, cardW, cardH, 8); ctx.fill();
+
+
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = owned ? 'rgba(140,190,255,0.4)' : (isPremium ? 'rgba(255,155,87,0.5)' : 'rgba(255,255,255,0.1)');
+    roundRect(x, y, cardW, cardH, 8); ctx.stroke();
+
+
+    ctx.fillStyle = w.color;
+    roundRect(x + 4, y + 4, cardW - 8, 4, 2); ctx.fill();
+
+
+    ctx.font = 'bold 11px system-ui, sans-serif';
+    ctx.fillStyle = owned ? '#c8d6ea' : '#e8b8a0';
+    ctx.fillText(w.short, x + cardW / 2, y + 26);
+
+
+    ctx.font = '9px system-ui, sans-serif';
+    ctx.fillStyle = '#7f8ea6';
+    wrapText(w.name, x + cardW / 2, y + 40, cardW - 8, 10);
+
+
+    ctx.font = '9px system-ui, sans-serif';
+    ctx.fillStyle = '#9fb0c8';
+    ctx.textAlign = 'left';
+    if (w.melee) {
+      ctx.fillText(`DMG ${w.dmg}`, x + 6, y + 58);
+      ctx.fillText(`ARC ${w.arc.toFixed(1)}`, x + 6, y + 70);
+    } else {
+      ctx.fillText(`DMG ${w.dmg}`, x + 6, y + 58);
+      ctx.fillText(`CD ${w.cd.toFixed(2)}s`, x + 6, y + 70);
+    }
+    if (w.pierce) ctx.fillText(`PIERCE ${w.pierce}`, x + 6, y + 82);
+    if (w.explode) ctx.fillText(`AOE ${w.explode}`, x + 6, y + 82);
+    if (w.slow) ctx.fillText(`SLOW 60%`, x + 6, y + 82);
+    if (w.pellets > 1) ctx.fillText(`x${w.pellets} pellets`, x + 6, y + 82);
+    ctx.textAlign = 'center';
+
+
+    if (owned) {
+      ctx.font = 'bold 11px system-ui, sans-serif';
+      ctx.fillStyle = '#7dff9b';
+      ctx.fillText('OWNED', x + cardW / 2, y + cardH - 10);
+    } else if (isPremium) {
+      ctx.font = 'bold 13px system-ui, sans-serif';
+      ctx.fillStyle = gems >= w.gemCost ? '#ffd85e' : '#ff8f8f';
+      ctx.fillText(`💎 ${w.gemCost}`, x + cardW / 2, y + cardH - 10);
+    } else {
+      ctx.font = 'bold 11px system-ui, sans-serif';
+      ctx.fillStyle = '#8f9fb8';
+      ctx.fillText(`UNLOCKS LV ${w.unlock}`, x + cardW / 2, y + cardH - 10);
+    }
+
+
+    addHit(x, y, cardW, cardH, () => buyWeapon(i));
+  }
+
+
+  const bw = 140, bh = 36;
+  drawButton(W() / 2 - bw / 2, H() - 42, bw, bh, 'CLOSE', '#8ecbff',
+    () => { mode = prevMode === 'playing' ? 'paused' : prevMode; });
+  ctx.textAlign = 'left';
+}
+
+
+function drawGemStore() {
+  drawDim();
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 30px system-ui, sans-serif';
+  ctx.fillStyle = '#ffd85e';
+  ctx.fillText('💎 GEM STORE', W() / 2, 46);
+
+
+  ctx.font = 'bold 16px system-ui, sans-serif';
+  ctx.fillStyle = '#ffe066';
+  ctx.fillText(`Your balance: ${gems} 💎`, W() / 2, 76);
+
+
+  const adReady = adTimer <= 0 && !adActive;
+  const adW = Math.min(300, W() - 40), adH = 48;
+  drawButton(W() / 2 - adW / 2, 96, adW, adH,
+    adReady ? '📺 WATCH AD → +10-25 💎' : `⏳ Ready in ${Math.ceil(adTimer)}s`,
+    adReady ? '#ff9b57' : '#7f8ea6',
+    adReady ? startAd : () => {});
+
+
+  ctx.font = 'bold 14px system-ui, sans-serif';
+  ctx.fillStyle = '#9fb0c8';
+  ctx.fillText('Or buy a gem pack [DEMO — no real charge]', W() / 2, 178);
+
+
+  const packs = [
+    { amount: 100, cost: '0.99' },
+    { amount: 300, cost: '2.99' },
+    { amount: 700, cost: '4.99' },
+    { amount: 1500, cost: '9.99' },
+  ];
+
+
+  const cols = Math.min(4, packs.length);
+  const cardW = Math.min(160, (W() - 40) / cols - 10);
+  const gap = 10;
+  const cardH = 92;
+  const totalW = cols * cardW + (cols - 1) * gap;
+  const startX = (W() - totalW) / 2;
+  const startY = 196;
+
+
+  for (let i = 0; i < packs.length; i++) {
+    const p = packs[i];
+    const x = startX + i * (cardW + gap);
+    const y = startY;
+
+
+    ctx.fillStyle = 'rgba(40,30,10,0.9)';
+    roundRect(x, y, cardW, cardH, 10); ctx.fill();
+    ctx.strokeStyle = '#ffd85e';
+    ctx.lineWidth = 2;
+    roundRect(x, y, cardW, cardH, 10); ctx.stroke();
+
+
+    ctx.font = 'bold 26px system-ui, sans-serif';
+    ctx.fillStyle = '#ffd85e';
+    ctx.fillText(`${p.amount} 💎`, x + cardW / 2, y + 40);
+
+
+    ctx.font = 'bold 14px system-ui, sans-serif';
+    ctx.fillStyle = '#7dff9b';
+    ctx.fillText(`$${p.cost}`, x + cardW / 2, y + 66);
+
+
+    ctx.font = '9px system-ui, sans-serif';
+    ctx.fillStyle = '#8f9fb8';
+    ctx.fillText('[DEMO]', x + cardW / 2, y + 82);
+
+
+    addHit(x, y, cardW, cardH, () => buyGemsPack(p.amount, p.cost));
+  }
+
+
+  ctx.font = '11px system-ui, sans-serif';
+  ctx.fillStyle = '#7f8ea6';
+  ctx.fillText('Real purchases require publishing with Google Play Billing.', W() / 2, H() - 78);
+  ctx.fillText('These buttons simulate the flow so you can test.', W() / 2, H() - 62);
+
+
+  const bw = 140, bh = 36;
+  drawButton(W() / 2 - bw / 2, H() - 42, bw, bh, 'CLOSE', '#ffd85e',
+    () => { mode = prevMode === 'playing' ? 'paused' : prevMode; });
+  ctx.textAlign = 'left';
+}
+
+
+function drawLeaderboard() {
+  drawDim();
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 30px system-ui, sans-serif';
+  ctx.fillStyle = '#ffe066';
+  ctx.fillText('🏆 LEADERBOARD', W() / 2, 46);
+
+
+  ctx.font = 'bold 14px system-ui, sans-serif';
+  ctx.fillStyle = '#8ecbff';
+  ctx.fillText(`Best score: ${highScore}`, W() / 2, 72);
+
+
+  const list = leaderboard.slice(0, 10);
+  ctx.font = '14px system-ui, sans-serif';
+  let y = 100;
+
+
+  if (list.length === 0) {
+    ctx.fillStyle = '#556178';
+    ctx.fillText('No scores yet — play a round!', W() / 2, y + 40);
+  } else {
+    const rowH = Math.min(28, (H() - 170) / Math.max(1, list.length));
+    for (let i = 0; i < list.length; i++) {
+      const e = list[i];
+      const rank = i + 1;
+      const color = rank === 1 ? '#ffd85e' : rank === 2 ? '#c0c8d8' : rank === 3 ? '#c98a4a' : '#9fb0c8';
+
+
+      ctx.fillStyle = 'rgba(12,18,30,0.75)';
+      roundRect(W() / 2 - 200, y - rowH * 0.7, 400, rowH - 2, 6); ctx.fill();
+
+
+      ctx.textAlign = 'left';
+      ctx.font = `bold ${rank <= 3 ? 17 : 15}px system-ui, sans-serif`;
+      ctx.fillStyle = color;
+      ctx.fillText(`#${rank}`, W() / 2 - 190, y);
+
+
+      ctx.font = '14px system-ui, sans-serif';
+      ctx.fillStyle = '#c8d6ea';
+      ctx.fillText((e.name || 'Hero').slice(0, 14), W() / 2 - 140, y);
+
+
+      ctx.textAlign = 'right';
+      ctx.fillStyle = color;
+      ctx.font = 'bold 15px system-ui, sans-serif';
+      ctx.fillText(String(e.score), W() / 2 + 190, y);
+
+
+      ctx.font = '11px system-ui, sans-serif';
+      ctx.fillStyle = '#7f8ea6';
+      if (e.stage) ctx.fillText(`stage ${e.stage}`, W() / 2 + 190, y - 12);
+
+
+      y += rowH;
+    }
+    ctx.textAlign = 'center';
+  }
+
+
+  const bw = 140, bh = 36;
+  drawButton(W() / 2 - bw / 2, H() - 42, bw, bh, 'CLOSE', '#ffe066',
+    () => { mode = prevMode === 'playing' ? 'paused' : prevMode; });
+  ctx.textAlign = 'left';
+}
+
+
+function drawAdOverlay() {
+  ctx.fillStyle = 'rgba(0,0,0,0.95)';
+  ctx.fillRect(0, 0, W(), H());
+
+
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 20px system-ui, sans-serif';
+  ctx.fillStyle = '#ff9b57';
+  ctx.fillText('📺 SIMULATED AD', W() / 2, H() / 2 - 60);
+
+
+  ctx.font = '14px system-ui, sans-serif';
+  ctx.fillStyle = '#9fb0c8';
+  ctx.fillText('Your reward will appear when this finishes...', W() / 2, H() / 2 - 30);
+
+
+  const remaining = Math.max(0, adRewardPending);
+  const frac = 1 - remaining / 3.0;
+  drawBar(W() / 2 - 150, H() / 2, 300, 14, frac, '#3a2010', '#ff9b57');
+
+
+  ctx.font = 'bold 24px system-ui, sans-serif';
+  ctx.fillStyle = '#ffd85e';
+  ctx.fillText(`${remaining.toFixed(1)}s`, W() / 2, H() / 2 + 50);
+
+
+  ctx.font = '11px system-ui, sans-serif';
+  ctx.fillStyle = '#556178';
+  ctx.fillText('In a real build this is where AdMob shows an interstitial.', W() / 2, H() / 2 + 90);
+  ctx.textAlign = 'left';
+}
+
+
+function drawPaused() {
+  ctx.fillStyle = 'rgba(5,8,14,0.78)';
+  ctx.fillRect(0, 0, W(), H());
+
+
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 40px system-ui, sans-serif';
+  ctx.fillStyle = '#8ecbff';
+  ctx.fillText('PAUSED', W() / 2, H() * 0.24);
+
+
+  const bw = Math.min(240, W() - 60), bh = 40;
+  const cx = W() / 2 - bw / 2;
+  let by = H() * 0.30;
+
+
+  drawButton(cx, by, bw, bh, '▶ RESUME', '#7dff9b', () => { mode = 'playing'; }, 'P / Esc');
+  by += bh + 8;
+  drawButton(cx, by, bw, bh, '🛒 WEAPONS', '#8ecbff', () => { prevMode = 'paused'; mode = 'shop'; }, 'S');
+  by += bh + 8;
+  drawButton(cx, by, bw, bh, '👑 GEM STORE', '#ffd85e', () => { prevMode = 'paused'; mode = 'gems'; }, 'G');
+  by += bh + 8;
+  drawButton(cx, by, bw, bh, '🛡 KNIGHT SKINS', '#c9a0ff', () => {
+    prevMode = 'paused'; skinCursor = skinIndex; mode = 'skins';
+  }, 'K');
+  by += bh + 8;
+  drawButton(cx, by, bw, bh, '💃 PRINCESS', '#ff9ec4', () => {
+    prevMode = 'paused'; princessCursor = princessSkinIndex; mode = 'skins_princess';
+  }, 'M');
+  by += bh + 8;
+  drawButton(cx, by, bw, bh, '🔄 RESTART', '#ff9b57', () => startGame(), 'R');
+
+
+  ctx.textAlign = 'left';
+}
+
+
+function drawGameOver() {
+  ctx.fillStyle = 'rgba(5,8,14,0.85)';
+  ctx.fillRect(0, 0, W(), H());
+
+
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 44px system-ui, sans-serif';
+  ctx.fillStyle = '#ff4d6d';
+  ctx.shadowBlur = 26; ctx.shadowColor = 'rgba(255,77,109,0.55)';
+  ctx.fillText('GAME OVER', W() / 2, H() * 0.16);
+  ctx.shadowBlur = 0;
+
+
+  ctx.font = 'bold 15px system-ui, sans-serif';
+  ctx.fillStyle = '#e8eef7';
+  ctx.fillText(gameOverReason, W() / 2, H() * 0.16 + 28);
+
+
+  const cw = Math.min(320, W() - 60);
+  const cardY = H() * 0.24;
+  ctx.fillStyle = 'rgba(12,18,30,0.9)';
+  roundRect(W() / 2 - cw / 2, cardY, cw, 118, 12); ctx.fill();
+  ctx.strokeStyle = 'rgba(140,190,255,0.25)';
+  ctx.lineWidth = 1.5;
+  roundRect(W() / 2 - cw / 2, cardY, cw, 118, 12); ctx.stroke();
+
+
+  ctx.font = 'bold 12px system-ui, sans-serif';
+  ctx.fillStyle = '#8ecbff';
+  ctx.fillText('FINAL SCORE', W() / 2, cardY + 22);
+
+
+  ctx.font = 'bold 36px system-ui, sans-serif';
+  ctx.fillStyle = '#ffe066';
+  ctx.fillText(String(finalScore), W() / 2, cardY + 58);
+
+
+  ctx.font = '12px system-ui, sans-serif';
+  ctx.fillStyle = '#9fb0c8';
+  ctx.fillText(`Stage ${stage.level} • Kills ${player.kills} • LV ${player.level}`,
+               W() / 2, cardY + 80);
+  ctx.fillStyle = '#ffd85e';
+  ctx.fillText(`💎 ${gems} gems`, W() / 2, cardY + 100);
+
+
+  const bw = Math.min(200, W() - 60), bh = 38;
+  const cx = W() / 2 - bw / 2;
+  let by = cardY + 136;
+
+
+  drawButton(cx, by, bw, bh, '🔄 PLAY AGAIN', '#7dff9b', () => startGame(), 'R');
+  by += bh + 7;
+  drawButton(cx, by, bw, bh, '🏆 LEADERBOARD', '#ffe066', () => {
+    prevMode = 'gameover'; mode = 'leaderboard';
+  }, 'L');
+  by += bh + 7;
+  drawButton(cx, by, bw, bh, '🛒 WEAPONS', '#8ecbff', () => {
+    prevMode = 'gameover'; mode = 'shop';
+  }, 'S');
+  by += bh + 7;
+  drawButton(cx, by, bw, bh, '👑 GEM STORE', '#ffd85e', () => {
+    prevMode = 'gameover'; mode = 'gems';
+  }, 'G');
+  by += bh + 7;
+  drawButton(cx, by, bw, bh, '⌂ MAIN MENU', '#c9a0ff', () => { mode = 'menu'; }, 'Esc');
+
+
+  ctx.textAlign = 'left';
+}
+
+
+function wrapText(text, cx, y, maxW, lineH) {
+  const words = text.split(' ');
+  let line = '';
+  const lines = [];
+  for (const word of words) {
+    const test = line ? line + ' ' + word : word;
+    if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = word; }
+    else line = test;
+  }
+  if (line) lines.push(line);
+  lines.forEach((l, i) => ctx.fillText(l, cx, y + i * lineH));
+}
+
+
+// ================================================================ RENDER
+function render() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, W(), H());
+  hitAreas.length = 0;
+
+
+  if (mode === 'menu') {
+    drawMenu();
+  } else {
+    drawBackground();
+    ctx.save();
+    if (shakeT > 0) ctx.translate(rand(-shakeMag, shakeMag), rand(-shakeMag, shakeMag));
+    if (player && princess) drawWorld();
+    ctx.restore();
+    if (player && princess) drawHUD();
+  drawAbilityBar();
+    drawSticks();
+
+
+    if (mode === 'paused') drawPaused();
+    else if (mode === 'gameover') drawGameOver();
+    else if (mode === 'skins') drawSkinsKnight();
+    else if (mode === 'skins_princess')drawSkinsPrincess();
+    else if (mode === 'shop') drawWeaponShop();
+    else if (mode === 'gems') drawGemStore();
+    else if (mode === 'leaderboard') drawLeaderboard();
+  }
+
+
+  if (adActive) drawAdOverlay();
+}
+
+
+
+// ================================================================ DIFFICULTY + ABILITIES
+function difficultyScale(){
+  return difficulty === 'easy' ? 0.72 : difficulty === 'hard' ? 1.38 : 1;
+}
+function setDifficulty(d){
+  difficulty=d;
+  menuDifficulty=d;
+  addToast(`DIFFICULTY: ${d.toUpperCase()}`, d==='hard'?'#ff5c73':d==='easy'?'#7dff9b':'#8ecbff');
+}
+function startGame(){
+  resetGame();
+  mode='playing';
+  last=performance.now();
+  abilityCooldown={clear:0,shock:0,tank:0};
+  tankMode=false; tankTimer=0; tankShots=0;
+  // difficulty changes the starting pressure without changing the controls
+  if(difficulty==='easy'){ player.maxHp=125; player.hp=125; princess.maxHp=125; princess.hp=125; }
+  if(difficulty==='hard'){ player.maxHp=90; player.hp=90; princess.maxHp=90; princess.hp=90; }
+  startStage(1,true);
+}
+function useClearStage(){
+  if(mode!=='playing' || abilityCooldown.clear>0) return;
+  stage.remaining=0;
+  stage.spawnTimer=999;
+  abilityCooldown.clear=28;
+  addToast('⚡ STAGE BREAK! Finish the remaining zombies!', '#ffe066');
+}
+function useShockwave(){
+  if(mode!=='playing' || abilityCooldown.shock>0) return;
+  abilityCooldown.shock=14;
+  const radius=360;
+  for(const z of zombies){
+    if(z.dead) continue;
+    const dx=z.x-player.x, dy=z.y-player.y, d=Math.hypot(dx,dy)||1;
+    if(d<radius){
+      const push=520*(1-d/radius)+220;
+      z.x += dx/d*push; z.y += dy/d*push;
+      z.stagger=0.45;
+    }
+  }
+  shakeScreen(12,0.2);
+  addToast('💨 SHOCKWAVE! They are pushed back!', '#8af0ff');
+}
+function useTank(){
+  if(mode!=='playing' || abilityCooldown.tank>0 || tankMode) return;
+  tankMode=true; tankTimer=16; tankShots=0; abilityCooldown.tank=38;
+  player.speed=300; player.maxHp+=45; player.hp=Math.min(player.maxHp,player.hp+45);
+  addToast('🛡 TANK DEPLOYED! Crush zombies or shoot!', '#ff9b57');
+}
+function updateAbilities(dt){
+  for(const k of Object.keys(abilityCooldown)) abilityCooldown[k]=Math.max(0,abilityCooldown[k]-dt);
+  if(tankMode){
+    tankTimer-=dt;
+    // Tank crushes ordinary zombies while moving through them.
+    for(const z of zombies){
+      if(z.dead || z.type.startsWith('boss')) continue;
+      if(dist(player.x,player.y,z.x,z.y)<player.r+z.r+14) hitZombie(z,32+difficultyScale()*10,player.angle,20);
+    }
+    if(tankTimer<=0){ tankMode=false; player.speed=235; addToast('Tank left the battlefield.', '#9fb0c8'); }
+  }
+}
+function updatePlayer(dt){
+  updateAbilities(dt);
+  updatePlayerOriginal(dt);
+}
+function fireWeapon(w){
+  if(tankMode){
+    // Tank cannon: powerful forward shot, while keeping the normal weapon system available.
+    const old=player.dmgMult;
+    player.dmgMult=old*2.8;
+    fireWeaponOriginal(w);
+    player.dmgMult=old;
+    tankShots++;
+    return;
+  }
+  fireWeaponOriginal(w);
+}
+function drawPrincess(){
+  if(!tankMode){ drawPrincessOriginal(); return; }
+  // Princess rides inside the tank; draw a small visible passenger window.
+  ctx.save(); ctx.translate(player.x-9,player.y-2);
+  ctx.fillStyle='#ff9ec4'; ctx.beginPath(); ctx.arc(0,-6,5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#e75480'; ctx.beginPath(); ctx.moveTo(-6,4); ctx.lineTo(0,-2); ctx.lineTo(6,4); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+function drawPlayer(){
+  if(!tankMode){ drawPlayerOriginal(); return; }
+  const x=player.x,y=player.y;
+  ctx.save(); ctx.translate(x,y); ctx.rotate(player.angle);
+  ctx.fillStyle='#374151'; ctx.strokeStyle='#f59e0b'; ctx.lineWidth=3;
+  roundRect(-28,-20,56,40,10); ctx.fill(); ctx.stroke();
+  ctx.fillStyle='#1f2937'; roundRect(-18,-14,36,28,6); ctx.fill();
+  ctx.fillStyle='#6b7280'; roundRect(4,-5,38,10,4); ctx.fill();
+  ctx.fillStyle='#22c55e'; ctx.beginPath(); ctx.arc(-9,-4,4,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#60a5fa'; ctx.beginPath(); ctx.arc(-9,7,4,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+function drawAbilityBar(){
+  if(mode!=='playing') return;
+  const y=H()-82, bw=Math.min(112,(W()-42)/3), gap=9;
+  const labels=[['1','END STAGE',abilityCooldown.clear],['2','SHOCKWAVE',abilityCooldown.shock],['3','TANK',abilityCooldown.tank]];
+  for(let i=0;i<3;i++){
+    const x=12+i*(bw+gap), ready=labels[i][2]<=0;
+    ctx.fillStyle=ready?'rgba(40,70,100,.9)':'rgba(25,30,40,.9)'; roundRect(x,y,bw,38,9); ctx.fill();
+    ctx.strokeStyle=ready?'rgba(255,224,102,.8)':'rgba(255,255,255,.12)'; ctx.stroke();
+    ctx.fillStyle=ready?'#ffe066':'#8b98a8'; ctx.font='bold 11px system-ui'; ctx.textAlign='center';
+    ctx.fillText(`${labels[i][0]}  ${labels[i][1]}`,x+bw/2,y+15);
+    ctx.font='10px system-ui'; ctx.fillText(ready?'READY':`${labels[i][2].toFixed(1)}s`,x+bw/2,y+29);
+  }
+  if(tankMode){ ctx.fillStyle='#ffb347'; ctx.font='bold 12px system-ui'; ctx.fillText(`TANK ${Math.ceil(tankTimer)}s`,W()/2,y-8); }
+  ctx.textAlign='left';
+}
+// Improved menu: retains the original premium menu, then adds difficulty + control cards.
+function drawMenu(){
+  drawMenuOriginal();
+  const w=Math.min(360,W()-28), x=W()/2-w/2;
+  const y=Math.min(H()-132, H()*0.72);
+  ctx.save();
+  ctx.fillStyle='rgba(7,12,22,.94)'; roundRect(x,y,w,112,16); ctx.fill();
+  ctx.strokeStyle='rgba(255,224,102,.35)'; ctx.stroke();
+  ctx.textAlign='center'; ctx.font='bold 12px system-ui'; ctx.fillStyle='#ffe066'; ctx.fillText('CHOOSE DIFFICULTY',W()/2,y+20);
+  const bw=(w-32)/3;
+  [['EASY','#7dff9b'],['NORMAL','#8ecbff'],['HARD','#ff5c73']].forEach((a,i)=>{
+    const bx=x+8+i*(bw+8), active=difficulty===a[0].toLowerCase();
+    ctx.fillStyle=active?a[1]:'rgba(255,255,255,.07)'; roundRect(bx,y+30,bw,28,7); ctx.fill();
+    ctx.fillStyle=active?'#06100b':'#dce5ef'; ctx.font='bold 11px system-ui'; ctx.fillText(a[0],bx+bw/2,y+49);
+    addHit(bx,y+30,bw,28,()=>setDifficulty(a[0].toLowerCase()));
+  });
+  ctx.fillStyle='#c5d0df'; ctx.font='11px system-ui';
+  ctx.fillText('W/S = forward/back   A/D = left/right   K = skins   Esc = pause/resume',W()/2,y+78);
+  ctx.fillText('1 = End Stage   2 = Shockwave   3 = Tank',W()/2,y+96);
+  ctx.restore();
+}
+
+
+// ================================================================ V2 POLISH + NEW FEATURES
+// Player profile, rating, camera, intro splash and improved controls.
+let playerName = 'Hero';
+let cameraMode = 'normal'; // normal / action
+let ratingValue = 0;
+let introStarted = performance.now();
+let nameInputEl = null;
+let nameBuffer = '';
+
+// Persist the new profile settings as well.
+const _oldBuildSave = buildSave;
+buildSave = function(){
+  let d = {};
+  try { d = JSON.parse(_oldBuildSave()); } catch(e) {}
+  d.playerName = playerName;
+  d.cameraMode = cameraMode;
+  d.ratingValue = ratingValue;
+  return JSON.stringify(d);
+};
+const _oldLoad = load;
+load = function(){
+  _oldLoad();
+  try {
+    const raw = readSave();
+    if(raw){ const d=JSON.parse(raw);
+      if(typeof d.playerName==='string' && d.playerName.trim()) playerName=d.playerName.slice(0,16);
+      if(d.cameraMode==='normal'||d.cameraMode==='action') cameraMode=d.cameraMode;
+      if(typeof d.ratingValue==='number') ratingValue=d.ratingValue;
+    }
+  } catch(e) {}
+};
+// Re-read once so new fields are available after the override.
+load();
+
+function ensureNameInput(){
+  if(nameInputEl) return nameInputEl;
+  nameInputEl=document.createElement('input');
+  nameInputEl.type='text';
+  nameInputEl.maxLength=16;
+  nameInputEl.autocomplete='off';
+  nameInputEl.spellcheck=false;
+  Object.assign(nameInputEl.style,{position:'fixed',left:'50%',top:'53%',transform:'translate(-50%,-50%)',width:'min(330px,78vw)',padding:'14px 18px',border:'2px solid #ffe066',borderRadius:'14px',background:'#0b1220',color:'#fff',font:'700 18px system-ui',textAlign:'center',outline:'none',zIndex:'9999',display:'none',boxSizing:'border-box'});
+  document.body.appendChild(nameInputEl);
+  nameInputEl.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){ e.preventDefault(); confirmName(); }
+    if(e.key==='Escape'){ e.preventDefault(); hideNameInput(); mode='menu'; }
+  });
+  return nameInputEl;
+}
+function showNameInput(){
+  const el=ensureNameInput();
+  nameBuffer=playerName==='Hero'?'':playerName;
+  el.value=nameBuffer;
+  el.style.display='block';
+  setTimeout(()=>{el.focus();el.select();},30);
+}
+function hideNameInput(){ if(nameInputEl) nameInputEl.style.display='none'; }
+function beginNameEntry(){ mode='name'; showNameInput(); }
+function confirmName(){
+  const el=ensureNameInput();
+  const n=(el.value||'').trim().replace(/[^a-zA-Z0-9 _-]/g,'').slice(0,16);
+  playerName=n||'Hero';
+  hideNameInput();
+  launchGame();
+}
+function launchGame(){
+  resetGame(); mode='playing'; last=performance.now();
+  abilityCooldown={clear:0,shock:0,tank:0}; abilityCooldown20=0; selectedAbility=null; tankMode=false; tankTimer=0; tankShots=0;
+  if(difficulty==='easy'){ player.maxHp=125; player.hp=125; princess.maxHp=125; princess.hp=125; }
+  if(difficulty==='hard'){ player.maxHp=90; player.hp=90; princess.maxHp=90; princess.hp=90; }
+  startStage(1,true);
+  spawnArmyCorners();
+  save();
+}
+// Replace the previous startGame so every new run asks for a name first.
+startGame = function(){ beginNameEntry(); };
+
+function spawnArmyCorners(){
+  soldiers=[];
+  const pts=[
+    [PAD+35,PAD+35],[W()/2,PAD+28],[W()-PAD-35,PAD+35],
+    [PAD+28,H()/2],[W()-PAD-28,H()/2],
+    [PAD+35,H()-PAD-35],[W()/2,H()-PAD-28],[W()-PAD-35,H()-PAD-35],
+    [W()*0.5,H()*0.22]
+  ];
+  for(let i=0;i<9;i++){
+    const [x,y]=pts[i];
+    soldiers.push({x,y,r:9,speed:150+rand(0,20),dmg:7+Math.floor(player.level/2),attackCd:rand(0,.3),flash:0,wob:rand(0,Math.PI*2),life:999});
+  }
+}
+
+function getCamera(){
+  if(cameraMode!=='action'||!player) return {x:0,y:0,zoom:1};
+  const zoom=1.16;
+  const viewW=W()/zoom, viewH=H()/zoom;
+  const look=75;
+  let cx=player.x-viewW/2+Math.cos(player.angle)*look;
+  let cy=player.y-viewH/2+Math.sin(player.angle)*look;
+  cx=clamp(cx,0,W()-viewW); cy=clamp(cy,0,H()-viewH);
+  return {x:cx,y:cy,zoom};
+}
+function worldMouse(){
+  const c=getCamera();
+  return {x:c.x+(mouse.x)/c.zoom,y:c.y+(mouse.y)/c.zoom};
+}
+
+// Keep WASD movement; S no longer opens the shop while playing.
+handleAction = function(k){
+  if(adActive) return;
+  if(mode==='intro') return;
+  if(mode==='name') return;
+  if(mode==='controls'||mode==='camera'||mode==='rating'||mode==='levels'){
+    if(k==='escape'||k==='backspace') mode=prevMode;
+    return;
+  }
+  if(mode==='shop'||mode==='princess_shop'||mode==='skins'||mode==='skins_princess'||mode==='leaderboard'||mode==='gems'){
+    if(k==='escape') { mode=(prevMode==='playing')?'paused':prevMode; return; }
+    if(mode==='skins'){
+      if(k==='a'||k==='arrowleft') skinCursor=(skinCursor-1+SKINS.length)%SKINS.length;
+      if(k==='d'||k==='arrowright') skinCursor=(skinCursor+1)%SKINS.length;
+      if(k==='enter'||k===' ') tryEquipKnightSkin(skinCursor);
+    }
+    if(mode==='skins_princess'){
+      if(k==='a'||k==='arrowleft') princessCursor=(princessCursor-1+PRINCESS_SKINS.length)%PRINCESS_SKINS.length;
+      if(k==='d'||k==='arrowright') princessCursor=(princessCursor+1)%PRINCESS_SKINS.length;
+      if(k==='enter'||k===' ') buyPrincessSkin(princessCursor);
+    }
+    if(mode==='shop'){
+      if(k==='a'||k==='arrowleft') weaponShopCursor=(weaponShopCursor-1+WEAPONS.length)%WEAPONS.length;
+      if(k==='d'||k==='arrowright') weaponShopCursor=(weaponShopCursor+1)%WEAPONS.length;
+      if(k==='enter'||k===' ') buyWeapon(weaponShopCursor);
+    }
+    return;
+  }
+  if(mode==='menu'){
+    if(k==='enter'||k===' ') beginNameEntry();
+    else if(k==='k'){prevMode='menu';skinCursor=skinIndex;mode='skins';}
+    else if(k==='m'){prevMode='menu';princessCursor=princessSkinIndex;mode='skins_princess';}
+    else if(k==='s'){prevMode='menu';mode='shop';}
+    else if(k==='g'){prevMode='menu';mode='gems';}
+    else if(k==='l'){prevMode='menu';mode='leaderboard';}
+    else if(k==='c'){prevMode='menu';mode='camera';}
+    else if(k==='h'){prevMode='menu';mode='controls';}
+    else if(k==='r'){prevMode='menu';mode='rating';}
+    return;
+  }
+  if(mode==='gameover'){
+    if(k==='r'||k==='enter') beginNameEntry();
+    else if(k==='escape') mode='menu';
+    else if(k==='l'){prevMode='gameover';mode='leaderboard';}
+    else if(k==='g'){prevMode='gameover';mode='gems';}
+    else if(k==='s'){prevMode='gameover';mode='shop';}
+    else if(k==='v'){prevMode='gameover';mode='rating';}
+    return;
+  }
+  if(mode==='paused'){
+    if(k==='p'||k==='escape') mode='playing';
+    else if(k==='r') beginNameEntry();
+    else if(k==='k'){prevMode='paused';skinCursor=skinIndex;mode='skins';}
+    else if(k==='m'){prevMode='paused';princessCursor=princessSkinIndex;mode='skins_princess';}
+    else if(k==='g'){prevMode='paused';mode='gems';}
+    else if(k==='l'){prevMode='paused';mode='leaderboard';}
+    else if(k==='c'){prevMode='paused';mode='camera';}
+    return;
+  }
+  if(mode==='playing'){
+    if(k==='p'||k==='escape'){mode='paused';return;}
+    if(k==='k'){prevMode='playing';skinCursor=skinIndex;mode='skins';return;}
+    if(k==='m'){prevMode='playing';princessCursor=princessSkinIndex;mode='skins_princess';return;}
+    // S is deliberately NOT a menu shortcut during gameplay: it is backward.
+    if(k==='g'){prevMode='playing';mode='gems';return;}
+    if(k==='l'){prevMode='playing';mode='leaderboard';return;}
+    if(k==='c'){cameraMode=cameraMode==='normal'?'action':'normal';addToast(`CAMERA: ${cameraMode.toUpperCase()}`, '#8ecbff');save();return;}
+    if(k==='1') useClearStage();
+    else if(k==='2') useShockwave();
+    else if(k==='3') useTank();
+    else if(k>='4'&&k<='9') selectWeapon(parseInt(k)-1);
+    else if(k==='0') selectWeapon(9);
+    else if(k==='q') cycleWeapon(-1);
+    else if(k==='e') cycleWeapon(1);
+  }
+};
+
+// Better mouse-to-world aiming in action camera.
+updatePlayerOriginal = function(dt){
+  let mx=0,my=0;
+  if(keys['a']||keys['arrowleft']) mx--;
+  if(keys['d']||keys['arrowright']) mx++;
+  if(keys['w']||keys['arrowup']) my--;
+  if(keys['s']||keys['arrowdown']) my++;
+  if(touchState.move){
+    const d=Math.hypot(touchState.move.dx,touchState.move.dy);
+    if(d>STICK_RADIUS*.14){const kk=Math.min(1,d/STICK_RADIUS)/d;mx=touchState.move.dx*kk;my=touchState.move.dy*kk;}
+  }
+  const len=Math.hypot(mx,my); if(len>1){mx/=len;my/=len;}
+  player.x=clamp(player.x+mx*player.speed*dt,PAD,W()-PAD);
+  player.y=clamp(player.y+my*player.speed*dt,PAD,H()-PAD);
+  const wm=worldMouse();
+  if(touchState.aim&&Math.hypot(touchState.aim.dx,touchState.aim.dy)>10) player.angle=Math.atan2(touchState.aim.dy,touchState.aim.dx);
+  else player.angle=Math.atan2(wm.y-player.y,wm.x-player.x);
+  player.cd=Math.max(0,player.cd-dt);player.swing=Math.max(0,player.swing-dt);player.flash=Math.max(0,player.flash-dt);
+  const w=WEAPONS[player.wIdx];
+  const touchFiring=touchState.aim&&Math.hypot(touchState.aim.dx,touchState.aim.dy)>10;
+  if((mouse.down||touchFiring)&&player.cd<=0) fireWeapon(w);
+};
+
+function drawIntro(){
+  const t=(performance.now()-introStarted)/1000;
+  ctx.fillStyle='#05070d';ctx.fillRect(0,0,W(),H());
+  const pulse=1+Math.sin(t*5)*.025;
+  ctx.save();ctx.translate(W()/2,H()/2);ctx.scale(pulse,pulse);
+  ctx.textAlign='center';
+  ctx.font=`900 ${Math.min(58,W()/8)}px system-ui`;
+  ctx.fillStyle='#ffe066';ctx.shadowBlur=30;ctx.shadowColor='rgba(255,224,102,.55)';
+  ctx.fillText('CRAZY GAMES',0,-24);ctx.shadowBlur=0;
+  ctx.font='700 20px system-ui';ctx.fillStyle='#ff6b8a';ctx.fillText('KNIGHT & PRINCESS',0,14);
+  ctx.font='600 13px system-ui';ctx.fillStyle='#9fb0c8';ctx.fillText('Developer: Omar',0,42);
+  ctx.restore();
+  ctx.textAlign='center';ctx.font='11px system-ui';ctx.fillStyle='#66758a';ctx.fillText('ZOMBIE SIEGE',W()/2,H()-30);
+  if(t>2.5) mode='menu';
+}
+function drawNameScreen(){
+  drawDim();ctx.textAlign='center';
+  ctx.font=`900 ${Math.min(40,W()/12)}px system-ui`;ctx.fillStyle='#ffe066';ctx.fillText('CHOOSE YOUR HERO NAME',W()/2,H()*.23);
+  ctx.font='14px system-ui';ctx.fillStyle='#9fb0c8';ctx.fillText('Enter your name before entering the siege',W()/2,H()*.30);
+  ctx.font='bold 13px system-ui';ctx.fillStyle='#8ecbff';ctx.fillText('Press Enter to continue',W()/2,H()*.63);
+  ctx.fillStyle='#66758a';ctx.font='11px system-ui';ctx.fillText('Letters, numbers, spaces and - / _ • max 16',W()/2,H()*.68);
+  ctx.textAlign='left';
+}
+function drawControls(){
+  drawDim();const w=Math.min(600,W()-32),x=(W()-w)/2;ctx.fillStyle='rgba(11,18,32,.96)';roundRect(x,40,w,H()-80,20);ctx.fill();
+  ctx.textAlign='center';ctx.font='900 30px system-ui';ctx.fillStyle='#ffe066';ctx.fillText('HOW TO PLAY',W()/2,82);
+  const lines=[['W / S','Forward / Back'],['A / D','Left / Right'],['Mouse / Right stick','Aim + fire'],['1','End Stage'],['2','Shockwave — push zombies away'],['3','Tank — ride, shoot & crush'],['K','Knight skins'],['C','Switch Normal / Action camera'],['Esc','Pause / Resume']];
+  let y=122;ctx.font='700 15px system-ui';
+  for(const [a,b] of lines){ctx.fillStyle='#8ecbff';ctx.fillText(a,W()/2-125,y);ctx.fillStyle='#e7edf6';ctx.fillText(b,W()/2+80,y);y+=32;}
+  ctx.font='700 13px system-ui';ctx.fillStyle='#ff9b57';ctx.fillText('Bosses arrive every 2 stages • Army bots: 9 max',W()/2,y+12);
+  drawButton(W()/2-100,H()-86,200,38,'← BACK','#c9a0ff',()=>{mode=prevMode;});
+  ctx.textAlign='left';
+}
+function drawCameraSettings(){
+  drawDim();ctx.textAlign='center';ctx.font='900 32px system-ui';ctx.fillStyle='#ffe066';ctx.fillText('CAMERA SETTINGS',W()/2,85);
+  ctx.font='13px system-ui';ctx.fillStyle='#9fb0c8';ctx.fillText('Press C anytime during a stage to switch cameras',W()/2,112);
+  const bw=Math.min(250,W()-70);const x=W()/2-bw/2;
+  drawButton(x,150,bw,70,`NORMAL CAMERA ${cameraMode==='normal'?'✓':''}`,'#8ecbff',()=>{cameraMode='normal';save();},'Classic view');
+  drawButton(x,235,bw,70,`ACTION CAMERA ${cameraMode==='action'?'✓':''}`,'#ff9b57',()=>{cameraMode='action';save();},'Close follow / action view');
+  ctx.font='11px system-ui';ctx.fillStyle='#66758a';ctx.fillText('Action camera follows your hero and looks toward your aim.',W()/2,330);
+  drawButton(x,H()-80,bw,38,'← BACK','#c9a0ff',()=>{mode=prevMode;});ctx.textAlign='left';
+}
+function drawRating(){
+  drawDim();ctx.textAlign='center';ctx.font='900 34px system-ui';ctx.fillStyle='#ffe066';ctx.fillText('RATE THE GAME',W()/2,72);
+  ctx.font='13px system-ui';ctx.fillStyle='#9fb0c8';ctx.fillText('How did the siege feel?',W()/2,98);
+  const opts=[['😄','VERY HAPPY'],['🙂','OKAY'],['😐','NOT BAD'],['🙁','BAD'],['😡','VERY BAD']];
+  let y=125;for(let i=0;i<5;i++){
+    const bw=Math.min(360,W()-42),x=W()/2-bw/2;
+    const selected=ratingValue===5-i;
+    drawButton(x,y,bw,46,`${opts[i][0]}   ${opts[i][1]}   ${'★'.repeat(5-i)}${'☆'.repeat(i)}`,selected?'#ffe066':'#8ecbff',()=>{ratingValue=5-i;save();addToast('Thanks for rating!','#7dff9b');mode=prevMode;});
+    y+=53;
+  }
+  drawButton(W()/2-90,H()-42,180,30,'← BACK','#c9a0ff',()=>{mode=prevMode;});ctx.textAlign='left';
+}
+function drawImprovedMenu(){
+  drawDim();
+  // premium hero backdrop
+  const g=ctx.createLinearGradient(0,0,W(),H());g.addColorStop(0,'#101b31');g.addColorStop(.55,'#080d18');g.addColorStop(1,'#170b19');ctx.fillStyle=g;ctx.fillRect(0,0,W(),H());
+  ctx.textAlign='center';
+  ctx.font=`900 ${Math.min(48,W()/9)}px system-ui`;ctx.fillStyle='#ffe066';ctx.shadowBlur=28;ctx.shadowColor='rgba(255,224,102,.4)';ctx.fillText('KNIGHT & PRINCESS',W()/2,58);ctx.shadowBlur=0;
+  ctx.font='900 18px system-ui';ctx.fillStyle='#ff5c73';ctx.fillText('Z O M B I E   S I E G E',W()/2,84);
+  ctx.font='700 11px system-ui';ctx.fillStyle='#8ecbff';ctx.fillText('CRAZY GAMES • DEVELOPER OMAR',W()/2,105);
+  ctx.font='12px system-ui';ctx.fillStyle='#c5d0df';ctx.fillText(`Welcome, ${playerName}   •   💎 ${gems}   •   🏆 ${highScore}`,W()/2,126);
+  const bw=Math.min(320,W()-42),x=W()/2-bw/2;let y=145;
+  drawButton(x,y,bw,44,'⚔ START SIEGE','#7dff9b',beginNameEntry,'Enter');y+=52;
+  drawButton(x,y,bw,36,'🎯 DIFFICULTY: '+difficulty.toUpperCase(),difficulty==='hard'?'#ff5c73':difficulty==='easy'?'#7dff9b':'#8ecbff',()=>{mode='levels';prevMode='menu';});y+=44;
+  drawButton(x,y,bw,34,'🎮 HOW TO PLAY','#8ecbff',()=>{prevMode='menu';mode='controls';});y+=42;
+  drawButton(x,y,bw,34,'🛡 SKINS (K)','#c9a0ff',()=>{prevMode='menu';skinCursor=skinIndex;mode='skins';});y+=42;
+  drawButton(x,y,bw,34,'⭐ RATE GAME','#ffe066',()=>{prevMode='menu';mode='rating';});y+=42;
+  drawButton(x,y,bw,34,'🏆 LEADERBOARD','#ffd85e',()=>{prevMode='menu';mode='leaderboard';});
+  ctx.font='10px system-ui';ctx.fillStyle='#66758a';ctx.fillText('Boss every 2 stages • 9 AI troops • gems are rare',W()/2,H()-16);
+  ctx.textAlign='left';
+}
+function drawLevels(){
+  drawDim();ctx.textAlign='center';ctx.font='900 34px system-ui';ctx.fillStyle='#ffe066';ctx.fillText('CHOOSE DIFFICULTY',W()/2,80);
+  ctx.font='13px system-ui';ctx.fillStyle='#9fb0c8';ctx.fillText('The higher the difficulty, the faster and tougher the siege.',W()/2,108);
+  const opts=[['easy','EASY','#7dff9b','More HP • slower enemies'],['normal','NORMAL','#8ecbff','Balanced challenge'],['hard','HARD','#ff5c73','Less HP • brutal bosses']];
+  let y=145;for(const o of opts){const bw=Math.min(380,W()-40),x=W()/2-bw/2;drawButton(x,y,bw,72,`${o[1]} ${difficulty===o[0]?'✓':''}`,o[2],()=>{difficulty=o[0];menuDifficulty=o[0];save();mode='menu';},o[3]);y+=88;}
+  drawButton(W()/2-100,H()-55,200,36,'← BACK','#c9a0ff',()=>{mode='menu';});ctx.textAlign='left';
+}
+
+// More dynamic, player-readable game over screen with name and rating shortcut.
+const _oldDrawGameOver=drawGameOver;
+drawGameOver=function(){
+  _oldDrawGameOver();
+  ctx.textAlign='center';ctx.font='bold 12px system-ui';ctx.fillStyle='#8ecbff';ctx.fillText(`HERO: ${playerName}`,W()/2,H()*.20);
+  ctx.textAlign='left';
+};
+
+// Camera-aware render while keeping HUD in screen space.
+render=function(){
+  ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,W(),H());hitAreas.length=0;
+  if(mode==='intro'){drawIntro();return;}
+  if(mode==='name'){drawNameScreen();return;}
+  if(mode==='controls'){drawControls();return;}
+  if(mode==='camera'){drawCameraSettings();return;}
+  if(mode==='rating'){drawRating();return;}
+  if(mode==='levels'){drawLevels();return;}
+  if(mode==='menu'){drawImprovedMenu();return;}
+  drawBackground();
+  ctx.save();
+  if(shakeT>0) ctx.translate(rand(-shakeMag,shakeMag),rand(-shakeMag,shakeMag));
+  const cam=getCamera();
+  if(cameraMode==='action'){
+    ctx.translate(-cam.x*cam.zoom,-cam.y*cam.zoom);ctx.scale(cam.zoom,cam.zoom);
+  }
+  if(player&&princess) drawWorld();
+  ctx.restore();
+  if(player&&princess) drawHUD();
+  drawAbilityBar();drawSticks();
+  if(mode==='paused') drawPaused();
+  else if(mode==='gameover') drawGameOver();
+  else if(mode==='skins') drawSkinsKnight();
+  else if(mode==='skins_princess') drawSkinsPrincess();
+  else if(mode==='shop') drawWeaponShop();
+  else if(mode==='gems') drawGemStore();
+  else if(mode==='leaderboard') drawLeaderboard();
+  if(adActive) drawAdOverlay();
+};
+
+// Intro should always appear on a fresh load, like a short game publisher splash.
+mode='intro';introStarted=performance.now();hideNameInput();
+
+// ================================================================ LOOP
+let last = performance.now();
+
+
+function loop(now) {
+  const dt = Math.min(0.033, (now - last) / 1000);
+  last = now;
+
+
+  if (mode === 'playing' && !adActive) update(dt);
+  else { updateToasts(dt); updateAds(dt); }
+
+
+  render();
+  requestAnimationFrame(loop);
+}
+
+
+// ================================================================= BOOT
+resetGame();
+mode = 'intro';
+introStarted = performance.now();
+requestAnimationFrame(loop);
+
+
+// ================================================================ V3 UPDATE — PUBG ACTION CAMERA, 3-TROOP FORMATION,
+// ABILITY CHOICE, 20s COOLDOWN, WEAPON HOTKEYS, AND AMONG-US-STYLE COSMETICS
+let selectedAbility = null;
+let abilityCooldown20 = 0;
+let abilityChoiceReason = '';
+let postGameRatingShown = false;
+let postGameTimer = 0;
+let hatIndex = 0, outfitIndex = 0, petIndex = 0;
+
+const HATS = [
+  {name:'No Hat', cost:0, kind:'none'},
+  {name:'Crown', cost:0, kind:'crown'},
+  {name:'Blue Cap', cost:20, kind:'cap'},
+  {name:'Red Beanie', cost:35, kind:'beanie'},
+  {name:'Cowboy', cost:55, kind:'cowboy'},
+  {name:'Viking', cost:80, kind:'viking'},
+  {name:'Space Helmet', cost:110, kind:'space'},
+];
+const OUTFITS = [
+  {name:'Classic', cost:0, body:'#5b7cfa', trim:'#dbe5ff'},
+  {name:'Stealth', cost:30, body:'#303846', trim:'#7f8ea6'},
+  {name:'Fire', cost:50, body:'#d94b3d', trim:'#ffd166'},
+  {name:'Royal', cost:75, body:'#6d3fd1', trim:'#ffe066'},
+  {name:'Toxic', cost:95, body:'#4d9f55', trim:'#c8ff7a'},
+  {name:'Cyber', cost:130, body:'#168aad', trim:'#72efdd'},
+];
+const PETS = [
+  {name:'No Pet', cost:0, kind:'none'},
+  {name:'Mini Bot', cost:35, kind:'bot'},
+  {name:'Mini Slime', cost:50, kind:'slime'},
+  {name:'Ghost', cost:70, kind:'ghost'},
+  {name:'Dragon', cost:120, kind:'dragon'},
+];
+let unlockedHats=[0], unlockedOutfits=[0], unlockedPets=[0];
+
+const _v3BuildSave = buildSave;
+buildSave = function(){
+  let d={}; try{ d=JSON.parse(_v3BuildSave()); }catch(e){}
+  d.hatIndex=hatIndex; d.outfitIndex=outfitIndex; d.petIndex=petIndex;
+  d.unlockedHats=unlockedHats; d.unlockedOutfits=unlockedOutfits; d.unlockedPets=unlockedPets;
+  return JSON.stringify(d);
+};
+function loadV3Cosmetics(){
+  try{
+    const raw=readSave(); if(!raw)return;
+    const d=JSON.parse(raw);
+    if(typeof d.hatIndex==='number')hatIndex=d.hatIndex;
+    if(typeof d.outfitIndex==='number')outfitIndex=d.outfitIndex;
+    if(typeof d.petIndex==='number')petIndex=d.petIndex;
+    if(Array.isArray(d.unlockedHats))unlockedHats=d.unlockedHats;
+    if(Array.isArray(d.unlockedOutfits))unlockedOutfits=d.unlockedOutfits;
+    if(Array.isArray(d.unlockedPets))unlockedPets=d.unlockedPets;
+  }catch(e){}
+}
+loadV3Cosmetics();
+
+function buyCosmetic(type,i){
+  const arr=type==='hat'?HATS:type==='outfit'?OUTFITS:PETS;
+  const unlocked=type==='hat'?unlockedHats:type==='outfit'?unlockedOutfits:unlockedPets;
+  const item=arr[i]; if(!item)return;
+  if(unlocked.includes(i)){
+    if(type==='hat')hatIndex=i; else if(type==='outfit')outfitIndex=i; else petIndex=i;
+    save(); return;
+  }
+  if(gems<item.cost){addToast(`Need ${item.cost} gems!`,'#ff6b6b');return;}
+  gems-=item.cost; unlocked.push(i);
+  if(type==='hat')hatIndex=i; else if(type==='outfit')outfitIndex=i; else petIndex=i;
+  addToast(`${item.name} equipped!`,'#c9a0ff'); save();
+}
+
+// --- Boss rewards now grant exactly one stationary companion, up to 3.
+function addBossTroop(){
+  if(!player || soldiers.length>=3)return;
+  const n=soldiers.length;
+  const offsets=[[-30,18],[30,18],[0,34]];
+  const o=offsets[n];
+  soldiers.push({
+    x:player.x+o[0], y:player.y+o[1], r:10,
+    dmg:10+Math.floor(player.level/2), attackCd:0.35, flash:0,
+    wob:0, hp:90, maxHp:90, dead:false, slot:n
+  });
+  addToast(`TROOP ${soldiers.length}/3 joined your formation!`,'#8ecbff');
+}
+
+const _v3KillZombie=killZombie;
+killZombie=function(z){
+  const wasBoss=z && z.type && z.type.startsWith('boss');
+  _v3KillZombie(z);
+  if(wasBoss && !z._v3Rewarded){
+    z._v3Rewarded=true;
+    addBossTroop();
+    selectedAbility=null;
+    abilityChoiceReason='BOSS DEFEATED — CHOOSE YOUR ABILITY';
+    if(mode==='playing') mode='abilityChoice';
+  }
+};
+
+// Stationary guards: they stay beside the player, do not run around, and fire at nearby zombies.
+updateSoldiers=function(dt){
+  if(!player)return;
+  const offsets=[[-30,18],[30,18],[0,34]];
+  for(let i=0;i<soldiers.length;i++){
+    const s=soldiers[i]; if(s.dead)continue;
+    const o=offsets[i]||[0,34];
+    s.x=clamp(player.x+o[0],PAD,W()-PAD);
+    s.y=clamp(player.y+o[1],PAD,H()-PAD);
+    s.flash=Math.max(0,s.flash-dt);
+    s.attackCd=Math.max(0,s.attackCd-dt);
+    let nearest=null,nd=380;
+    for(const z of zombies){if(z.dead)continue;const d=dist(s.x,s.y,z.x,z.y);if(d<nd){nd=d;nearest=z;}}
+    if(nearest && s.attackCd<=0){
+      s.attackCd=.72;
+      const a=Math.atan2(nearest.y-s.y,nearest.x-s.x);
+      hitZombie(nearest,s.dmg,a,3);
+      s.flash=.12;
+      particles.push({x:s.x,y:s.y,vx:Math.cos(a)*180,vy:Math.sin(a)*180,life:.16,max:.16,r:2.5,color:'#8ecbff',drag:2});
+    }
+  }
+};
+
+// Prevent the old kill-based recruitment and corner army. New troops arrive only after bosses.
+spawnArmyCorners=function(){ soldiers=[]; };
+
+// --- Abilities: choose one after every boss, press H to use it, 20s recharge.
+function activateAbility(){
+  if(mode!=='playing' || !selectedAbility || abilityCooldown20>0)return;
+  if(selectedAbility==='clear'){
+    stage.remaining=0; stage.spawnTimer=999; addToast('⚡ STAGE ENDED!','#ffe066');
+  }else if(selectedAbility==='shock'){
+    const radius=390;
+    for(const z of zombies){if(z.dead)continue;const dx=z.x-player.x,dy=z.y-player.y,d=Math.hypot(dx,dy)||1;if(d<radius){const push=600*(1-d/radius)+260;z.x+=dx/d*push;z.y+=dy/d*push;z.stagger=.5;}}
+    shakeScreen(16,.22); addToast('💨 ZOMBIES PUSHED AWAY!','#72efdd');
+  }else if(selectedAbility==='tank'){
+    useTank();
+    abilityCooldown.tank=0;
+  }
+  abilityCooldown20=20;
+}
+
+function chooseAbility(id){
+  selectedAbility=id; abilityCooldown20=0; mode='playing';
+  addToast(`ABILITY READY: ${id.toUpperCase()} — press H`,'#ffe066');
+}
+
+// Remove old numeric ability bindings: 1..9 are weapons.
+const _v3HandleAction=handleAction;
+handleAction=function(k){
+  if(mode==='abilityChoice'){
+    if(k==='1')chooseAbility('clear');
+    else if(k==='2')chooseAbility('shock');
+    else if(k==='3')chooseAbility('tank');
+    else if(k==='escape'){mode='paused';}
+    return;
+  }
+  if(mode==='playing' && k==='h'){activateAbility();return;}
+  if(mode==='playing' && k==='c'){
+    cameraMode=cameraMode==='normal'?'action':'normal';
+    addToast(`CAMERA: ${cameraMode.toUpperCase()}`,'#8ecbff'); save(); return;
+  }
+  if(mode==='playing' && k>='1' && k<='9'){selectWeapon(parseInt(k,10)-1);return;}
+  if(mode==='playing' && k==='0'){selectWeapon(9);return;}
+  _v3HandleAction(k);
+};
+
+// --- PUBG-like third-person action camera: hero lower-center, world rotates toward aim.
+getCamera=function(){
+  return {x:0,y:0,zoom:cameraMode==='action'?1.28:1};
+};
+worldMouse=function(){
+  if(cameraMode!=='action'||!player)return {x:mouse.x,y:mouse.y};
+  const zoom=1.28;
+  const sx=mouse.x-W()/2, sy=mouse.y-H()*.62;
+  const a=player.angle+Math.PI/2;
+  return {x:player.x+(sx*Math.cos(a)-sy*Math.sin(a))/zoom,
+          y:player.y+(sx*Math.sin(a)+sy*Math.cos(a))/zoom};
+};
+
+// Cosmetics are drawn on top of the player, giving the simple colorful collectible look requested.
+function drawPlayerCosmetics(){
+  if(!player)return;
+  const hat=HATS[hatIndex]||HATS[0], outfit=OUTFITS[outfitIndex]||OUTFITS[0], pet=PETS[petIndex]||PETS[0];
+  ctx.save(); ctx.translate(player.x,player.y);
+  // outfit
+  ctx.fillStyle=outfit.body; ctx.globalAlpha=.92; ctx.beginPath();ctx.arc(0,0,player.r*.82,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;
+  ctx.strokeStyle=outfit.trim;ctx.lineWidth=2;ctx.stroke();
+  // hat
+  if(hat.kind==='crown'){ctx.fillStyle='#ffd85e';ctx.beginPath();ctx.moveTo(-8,-10);ctx.lineTo(-5,-19);ctx.lineTo(-1,-12);ctx.lineTo(3,-20);ctx.lineTo(7,-10);ctx.closePath();ctx.fill();}
+  if(hat.kind==='cap'){ctx.fillStyle='#2f80ed';ctx.fillRect(-9,-14,18,6);ctx.beginPath();ctx.arc(0,-12,10,Math.PI,0);ctx.fill();}
+  if(hat.kind==='beanie'){ctx.fillStyle='#e94b5f';ctx.beginPath();ctx.arc(0,-10,11,Math.PI,0);ctx.fill();ctx.fillRect(-11,-11,22,4);}
+  if(hat.kind==='cowboy'){ctx.fillStyle='#9a6b3f';ctx.fillRect(-13,-13,26,4);ctx.beginPath();ctx.arc(0,-15,9,Math.PI,0);ctx.fill();}
+  if(hat.kind==='viking'){ctx.fillStyle='#d8dde8';ctx.beginPath();ctx.arc(0,-10,11,Math.PI,0);ctx.fill();ctx.fillRect(-12,-10,24,3);ctx.strokeStyle='#d8dde8';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-9,-12);ctx.lineTo(-15,-20);ctx.moveTo(9,-12);ctx.lineTo(15,-20);ctx.stroke();}
+  if(hat.kind==='space'){ctx.strokeStyle='#8ecbff';ctx.lineWidth=3;ctx.beginPath();ctx.arc(0,-1,player.r+3,0,Math.PI*2);ctx.stroke();}
+  // pet beside player
+  if(pet.kind!=='none'){
+    const px=-player.r-9,py=11;
+    if(pet.kind==='bot'){ctx.fillStyle='#8fa0c0';roundRect(px-6,py-6,12,12,3);ctx.fill();ctx.fillStyle='#72efdd';ctx.fillRect(px-2,py-2,4,4);}
+    if(pet.kind==='slime'){ctx.fillStyle='#58d68d';ctx.beginPath();ctx.arc(px,py,8,Math.PI,0);ctx.lineTo(px+8,py+6);ctx.lineTo(px-8,py+6);ctx.closePath();ctx.fill();}
+    if(pet.kind==='ghost'){ctx.fillStyle='#c7b7ff';ctx.globalAlpha=.8;ctx.beginPath();ctx.arc(px,py-2,8,Math.PI,0);ctx.lineTo(px+8,py+8);ctx.lineTo(px+3,py+5);ctx.lineTo(px,py+9);ctx.lineTo(px-3,py+5);ctx.lineTo(px-8,py+8);ctx.closePath();ctx.fill();ctx.globalAlpha=1;}
+    if(pet.kind==='dragon'){ctx.fillStyle='#ff7a59';ctx.beginPath();ctx.arc(px,py,8,0,Math.PI*2);ctx.fill();ctx.fillStyle='#ffe066';ctx.beginPath();ctx.arc(px-3,py-2,1.5,0,Math.PI*2);ctx.fill();}
+  }
+  ctx.restore();
+}
+const _v3DrawWorld=drawWorld;
+drawWorld=function(){_v3DrawWorld();drawPlayerCosmetics();};
+
+// 3-troop HUD.
+const _v3DrawHUD=drawHUD;
+drawHUD=function(){_v3DrawHUD();
+  if(mode==='playing'){
+    ctx.textAlign='right';ctx.font='bold 10px system-ui';ctx.fillStyle='#8ecbff';
+    ctx.fillText(`TROOPS ${soldiers.length}/3`,W()-12,64);ctx.textAlign='left';
+  }
+};
+
+function drawAbilityChoice(){
+  drawDim();
+  ctx.textAlign='center';ctx.font='900 30px system-ui';ctx.fillStyle='#ffe066';ctx.fillText('BOSS DEFEATED!',W()/2,70);
+  ctx.font='bold 15px system-ui';ctx.fillStyle='#8ecbff';ctx.fillText('Choose ONE ability for the next battles',W()/2,98);
+  const opts=[['1','⚡ END STAGE','Finish the current stage immediately'],['2','💨 SHOCKWAVE','Blast zombies away from you'],['3','🛡 TANK','Ride, shoot and crush normal zombies']];
+  let y=125;
+  for(const o of opts){const w=Math.min(420,W()-42),x=W()/2-w/2;drawButton(x,y,w,66,`${o[0]}   ${o[1]}`,'#ff9b57',()=>chooseAbility(o[0]==='1'?'clear':o[0]==='2'?'shock':'tank'),o[2]);y+=78;}
+  ctx.font='bold 12px system-ui';ctx.fillStyle='#c9d5e5';ctx.fillText('You must choose after every boss. Press H to activate. Recharge: 20 seconds.',W()/2,H()-36);
+  ctx.textAlign='left';
+}
+
+// Compact ability status: H is the ability key now.
+drawAbilityBar=function(){
+  if(mode!=='playing')return;
+  const y=H()-82,w=Math.min(300,W()-24),x=W()/2-w/2;
+  ctx.fillStyle='rgba(7,12,22,.92)';roundRect(x,y,w,42,10);ctx.fill();
+  ctx.strokeStyle=selectedAbility?'#ffe066':'rgba(255,255,255,.15)';ctx.stroke();
+  ctx.textAlign='center';ctx.font='bold 12px system-ui';ctx.fillStyle=selectedAbility?'#ffe066':'#8b98a8';
+  const names={clear:'END STAGE',shock:'SHOCKWAVE',tank:'TANK'};
+  ctx.fillText(selectedAbility?`H • ${names[selectedAbility]}`:'H • CHOOSE AN ABILITY AFTER A BOSS',W()/2,y+17);
+  ctx.font='10px system-ui';ctx.fillStyle='#9fb0c8';ctx.fillText(selectedAbility?(abilityCooldown20>0?`RECHARGING ${abilityCooldown20.toFixed(1)}s`:'READY'):'Boss reward',W()/2,y+33);
+  ctx.textAlign='left';
+};
+
+// Ability timer update, including tank mode.
+const _v3UpdateAbilities=updateAbilities;
+updateAbilities=function(dt){
+  abilityCooldown20=Math.max(0,abilityCooldown20-dt);
+  if(tankMode){
+    tankTimer-=dt;
+    for(const z of zombies){if(z.dead||z.type.startsWith('boss'))continue;if(dist(player.x,player.y,z.x,z.y)<player.r+z.r+18)hitZombie(z,42+difficultyScale()*10,player.angle,20);}
+    if(tankTimer<=0){tankMode=false;player.speed=235;addToast('Tank left the battlefield.','#9fb0c8');}
+  }
+};
+
+// Rating now appears after the game-over screen. The player can rate once per run.
+const _v3EndGame=endGame;
+endGame=function(reason){
+  if(mode==='gameover'||mode==='rating')return;
+  _v3EndGame(reason);
+  leaderboard=leaderboard.map((x,i)=>i===0&&x.name==='You'?{...x,name:playerName}:x);
+  postGameRatingShown=false;postGameTimer=1.8;
+};
+const _v3Update=update;
+update=function(dt){
+  _v3Update(dt);
+};
+
+// Customization screen: hats, clothes and pets.
+drawSkinsKnight=function(){
+  drawDim();ctx.textAlign='center';ctx.font='900 28px system-ui';ctx.fillStyle='#c9a0ff';ctx.fillText('CUSTOMIZE HERO',W()/2,42);
+  ctx.font='11px system-ui';ctx.fillStyle='#9fb0c8';ctx.fillText('Among Us-style collectibles • tap to equip / buy',W()/2,62);
+  const sections=[['HATS',HATS,hatIndex,unlockedHats,'hat'],['CLOTHES',OUTFITS,outfitIndex,unlockedOutfits,'outfit'],['PETS',PETS,petIndex,unlockedPets,'pet']];
+  let y=82;
+  for(const [title,arr,active,owned,type] of sections){
+    ctx.textAlign='left';ctx.font='bold 12px system-ui';ctx.fillStyle='#ffe066';ctx.fillText(title,18,y);y+=18;
+    const cardW=Math.min(105,(W()-50)/4),gap=8;
+    for(let i=0;i<Math.min(arr.length,5);i++){
+      const x=18+i*(cardW+gap), item=arr[i], on=owned.includes(i), eq=i===active;
+      ctx.fillStyle=eq?'rgba(255,224,102,.18)':'rgba(12,18,30,.9)';roundRect(x,y,cardW,54,8);ctx.fill();
+      ctx.strokeStyle=eq?'#ffe066':on?'rgba(140,190,255,.4)':'rgba(255,255,255,.1)';ctx.stroke();
+      ctx.textAlign='center';ctx.font='bold 9px system-ui';ctx.fillStyle=on?'#e7edf6':'#78869a';ctx.fillText(item.name,x+cardW/2,y+19);
+      ctx.font='9px system-ui';ctx.fillStyle=on?'#7dff9b':'#ffd85e';ctx.fillText(on?(eq?'EQUIPPED':'OWNED'):`💎 ${item.cost}`,x+cardW/2,y+39);
+      addHit(x,y,cardW,54,()=>buyCosmetic(type,i));
+    }
+    y+=66;
+  }
+  drawButton(W()/2-90,H()-44,180,32,'CLOSE','#c9a0ff',()=>{mode=prevMode==='playing'?'paused':prevMode;});
+  ctx.textAlign='left';
+};
+
+// Action camera render: third-person follow, player lower-center and looking forward.
+render=function(){
+  ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,W(),H());hitAreas.length=0;
+  if(mode==='intro'){drawIntro();return;} if(mode==='name'){drawNameScreen();return;} if(mode==='controls'){drawControls();return;} if(mode==='camera'){drawCameraSettings();return;} if(mode==='rating'){drawRating();return;} if(mode==='levels'){drawLevels();return;} if(mode==='abilityChoice'){drawAbilityChoice();return;} if(mode==='menu'){drawImprovedMenu();return;}
+  if(mode==='gameover'&&!postGameRatingShown){postGameTimer-=0.016;if(postGameTimer<=0){postGameRatingShown=true;prevMode='gameover';mode='rating';return;}}
+  drawBackground();ctx.save();
+  if(shakeT>0)ctx.translate(rand(-shakeMag,shakeMag),rand(-shakeMag,shakeMag));
+  if(cameraMode==='action'&&player){
+    const zoom=1.28;
+    ctx.translate(W()/2,H()*.62);
+    ctx.rotate(-player.angle-Math.PI/2);
+    ctx.scale(zoom,zoom);
+    ctx.translate(-player.x,-player.y);
+  }
+  if(player&&princess)drawWorld();ctx.restore();
+  if(player&&princess)drawHUD();drawAbilityBar();drawSticks();
+  if(mode==='paused')drawPaused();else if(mode==='gameover')drawGameOver();else if(mode==='skins')drawSkinsKnight();else if(mode==='skins_princess')drawSkinsPrincess();else if(mode==='shop')drawWeaponShop();else if(mode==='gems')drawGemStore();else if(mode==='leaderboard')drawLeaderboard();
+  if(adActive)drawAdOverlay();
+};
+
+// Controls screen updated for the new scheme.
+drawControls=function(){
+  drawDim();const w=Math.min(620,W()-30),x=(W()-w)/2;ctx.fillStyle='rgba(11,18,32,.97)';roundRect(x,34,w,H()-68,20);ctx.fill();
+  ctx.textAlign='center';ctx.font='900 28px system-ui';ctx.fillStyle='#ffe066';ctx.fillText('HOW TO PLAY',W()/2,72);
+  const lines=[['W / S','Forward / Back'],['A / D','Left / Right'],['Mouse / Right stick','Aim + fire'],['1 - 9 / 0','Weapons'],['H','Use chosen ability'],['C','PUBG-style Action Camera'],['K','Hats • Clothes • Pets • Skins'],['Esc','Pause / Resume']];
+  let y=112;for(const [a,b] of lines){ctx.font='bold 14px system-ui';ctx.fillStyle='#8ecbff';ctx.fillText(a,W()/2-120,y);ctx.fillStyle='#e7edf6';ctx.fillText(b,W()/2+110,y);y+=31;}
+  ctx.font='bold 12px system-ui';ctx.fillStyle='#ff9b57';ctx.fillText('Boss every 2 stages • max 3 stationary troops • one new troop per boss',W()/2,y+8);
+  ctx.fillStyle='#c9d5e5';ctx.fillText('After each boss: choose 1 ability. Ability recharge is 20 seconds.',W()/2,y+30);
+  drawButton(W()/2-90,H()-62,180,34,'← BACK','#c9a0ff',()=>{mode=prevMode;});ctx.textAlign='left';
+};
+
+
+
+// ================================================================ FINAL GAMEPLAY UPGRADE
+// Weapon progression: one new weapon every 20 zombie kills.
+let nextKillWeaponIndex = 2;
+function unlockWeaponForKills() {
+  while (nextKillWeaponIndex < WEAPONS.length && unlockedWeapons.includes(WEAPONS[nextKillWeaponIndex].id)) nextKillWeaponIndex++;
+  if (nextKillWeaponIndex >= WEAPONS.length) return;
+  const w = WEAPONS[nextKillWeaponIndex];
+  unlockedWeapons.push(w.id);
+  addToast(`🔓 WEAPON UNLOCKED: ${w.name}`, w.color || '#ffe066');
+  save();
+  nextKillWeaponIndex++;
+}
+const _finalKillZombie = killZombie;
+killZombie = function(z) {
+  const before = player ? player.kills : 0;
+  _finalKillZombie(z);
+  if (!z.dead || !player || player.kills <= before) return;
+  if (player.kills > 0 && player.kills % 20 === 0) unlockWeaponForKills();
+};
+
+// More weapons are selected with 1-9 and 0; Q/E cycle through all unlocked weapons.
+const _finalHandleAction = handleAction;
+handleAction = function(k) {
+  if (mode === 'playing') {
+    if (k === 'c') { addToast('Camera is now permanently set to NORMAL.', '#8ecbff'); return; }
+  }
+  _finalHandleAction(k);
+};
+
+// Disable the old action-camera transform permanently.
+cameraMode = 'normal';
+getCamera = function() { return {x:0, y:0, zoom:1}; };
+
+// Abilities have a 10-second active window. Recharge remains 20 seconds.
+let abilityActiveTimer10 = 0;
+let shockPulseTimer10 = 0;
+const _finalActivateAbility = activateAbility;
+activateAbility = function() {
+  if (mode !== 'playing' || !selectedAbility || abilityCooldown20 > 0) return;
+  _finalActivateAbility();
+  if (abilityCooldown20 > 0) {
+    abilityActiveTimer10 = 10;
+    shockPulseTimer10 = 0;
+    if (selectedAbility === 'tank') tankTimer = 10;
+  }
+};
+const _finalUpdate = update;
+update = function(dt) {
+  _finalUpdate(dt);
+  if (abilityActiveTimer10 > 0) {
+    abilityActiveTimer10 = Math.max(0, abilityActiveTimer10 - dt);
+    if (selectedAbility === 'shock' && mode === 'playing') {
+      shockPulseTimer10 -= dt;
+      if (shockPulseTimer10 <= 0) {
+        shockPulseTimer10 = 0.32;
+        const radius = 330;
+        for (const z of zombies) {
+          if (z.dead) continue;
+          const dx = z.x - player.x, dy = z.y - player.y;
+          const d = Math.hypot(dx, dy) || 1;
+          if (d < radius) {
+            const push = 120 + (1 - d / radius) * 260;
+            z.x += dx / d * push * 0.25;
+            z.y += dy / d * push * 0.25;
+            z.stagger = 0.25;
+          }
+        }
+      }
+    }
+  }
+};
+
+// Rating appears immediately when the game ends.
+const _finalEndGame = endGame;
+endGame = function(reason) {
+  if (mode === 'gameover' || mode === 'rating') return;
+  _finalEndGame(reason);
+  if (mode === 'gameover') {
+    prevMode = 'menu';
+    postGameRatingShown = true;
+    mode = 'rating';
+  }
+};
+
+// Make the post-game rating screen explicitly thank the player.
+const _finalDrawRating = drawRating;
+drawRating = function() {
+  _finalDrawRating();
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 12px system-ui';
+  ctx.fillStyle = '#7dff9b';
+  ctx.fillText('THANK YOU FOR YOUR RESPONSE! 💚', W()/2, H()-68);
+  ctx.restore();
+};
+
+// Updated controls text: no action camera, plus the expanded weapon system.
+const _finalDrawControls = drawControls;
+drawControls = function() {
+  _finalDrawControls();
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 10px system-ui';
+  ctx.fillStyle = '#c9d5e5';
+  ctx.fillText('Weapons: 1, 2, 3, 4... • each number selects that weapon • H = ability', W()/2, H()-18);
+  ctx.restore();
+};
+
+// Rebuild kill-unlock pointer from the current save.
+(function syncKillWeaponPointer(){
+  nextKillWeaponIndex = 2;
+  while (nextKillWeaponIndex < WEAPONS.length && unlockedWeapons.includes(WEAPONS[nextKillWeaponIndex].id)) nextKillWeaponIndex++;
+})();
+
+</script>
+</body>
+</html>
